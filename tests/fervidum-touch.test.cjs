@@ -5,6 +5,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const script = fs.readFileSync(path.join(__dirname, "..", "js", "fervidum.js"), "utf8");
+const styles = fs.readFileSync(path.join(__dirname, "..", "css", "fervidum.css"), "utf8");
 
 class FakeClassList {
   #values = new Set();
@@ -349,4 +350,12 @@ test("a touch pointer event is not restarted by its follow-up click and survives
   assert.equal(sweep.context2d.fills.length, startsAfterPointerUp + 1);
   assert.ok(sweep.classList.contains("is-active"));
   assert.ok(harness.body.classList.contains("fervidumWarpActive"));
+});
+
+test("the active haze never hides its source image between WebGL frames", () => {
+  assert.doesNotMatch(
+    styles,
+    /body\.fervidumWarpActive\s+\.fervidumSource\s*\{[^}]*opacity\s*:/s
+  );
+  assert.match(styles, /body\.fervidumWarpActive\s+\.fervidumWave\s*\{[^}]*opacity\s*:\s*1/s);
 });
