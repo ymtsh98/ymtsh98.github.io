@@ -369,4 +369,7 @@ test("the heat haze fades to the original image at its edges", () => {
   assert.match(script, /float edgeFade = smoothstep\(0\.0, 0\.028, edgeDistance\);/);
   assert.match(script, /vec2 distortedUv = v_uv \+ offset \* edgeFade;/);
   assert.doesNotMatch(script, /vec2 distortedUv = clamp\(/);
+  assert.match(styles, /\.fervidumWarpHost\s*\{[^}]*overflow\s*:\s*hidden/s);
+  assert.match(styles, /\.fervidumWave\s*\{[^}]*inset\s*:\s*-3px/s);
+  assert.match(styles, /\.fervidumWave\s*\{[^}]*width\s*:\s*calc\(100% \+ 6px\)/s);
 });
