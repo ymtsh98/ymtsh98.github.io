@@ -189,6 +189,14 @@ const createConnections = () => {
   connectionLayer.setAttribute("aria-hidden", "true");
   document.body.insertAdjacentElement("afterbegin", connectionLayer);
 
+  if (canUseTouchEffects) {
+    // SVG shares document coordinates with the boxes, so pinch-zoom needs no redraw.
+    window.addEventListener("load", scheduleConnections, { once: true });
+    window.addEventListener("orientationchange", scheduleConnections, { passive: true });
+    scheduleConnections();
+    return;
+  }
+
   const resizeObserver = new ResizeObserver(scheduleConnections);
   const observeConnectionHosts = () => {
     document.querySelectorAll(".page, .profileLinks, .gallery, .profileLinks a, .blogLinks, .tile")
