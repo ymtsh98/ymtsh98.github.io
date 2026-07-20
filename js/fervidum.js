@@ -44,7 +44,7 @@ const easeInOut = (value) => value * value * (3 - 2 * value);
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
 const getConnectionHosts = () => Array.from(
-  document.querySelectorAll(".profileLinks a, .tile")
+  document.querySelectorAll(".profileLinks a, .blogLinks, .tile")
 ).map((element) => {
   const rect = element.getBoundingClientRect();
 
@@ -168,7 +168,7 @@ const createConnections = () => {
 
   const resizeObserver = new ResizeObserver(scheduleConnections);
   const observeConnectionHosts = () => {
-    document.querySelectorAll(".page, .profileLinks, .gallery, .profileLinks a, .tile")
+    document.querySelectorAll(".page, .profileLinks, .gallery, .profileLinks a, .blogLinks, .tile")
       .forEach((element) => resizeObserver.observe(element));
   };
 

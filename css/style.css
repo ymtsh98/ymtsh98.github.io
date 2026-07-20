@@ -29,6 +29,10 @@ body {
   font-family: "Klee One", "Yu Kyokasho", "Yu Gothic UI", "Hiragino Sans", system-ui, sans-serif;
 }
 
+a {
+  text-decoration: none;
+}
+
 .boxConnections {
   position: fixed;
   inset: 0;
@@ -90,6 +94,49 @@ body {
   text-decoration-color: currentColor;
 }
 
+.blogLinks {
+  position: relative;
+  isolation: isolate;
+  z-index: 2;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 16px 8px 12px;
+  color: #435a70;
+  font-weight: 600;
+  font-size: clamp(0.83rem, 1.4vw, 1rem);
+  line-height: 1.45;
+}
+
+.blogLinks::before {
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  content: "";
+  pointer-events: none;
+  border-style: solid;
+  border-width: 2px 5px 2px 1px;
+  border-color: #3d4b5c #596778 #303d4d #526174;
+  transform: rotate(0.15deg);
+}
+
+.blogLinks a {
+  color: inherit;
+  text-decoration-color: rgba(67, 90, 112, 0.45);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: color 160ms ease, text-decoration-color 160ms ease;
+}
+
+.blogLinks:hover,
+.blogLinks:focus-within {
+  color: #b35447;
+}
+
+.blogLinks:hover a,
+.blogLinks a:focus-visible {
+  text-decoration-color: currentColor;
+}
+
 .gallery {
   --gallery-gap: clamp(24px, 3vw, 36px);
   position: relative;
@@ -104,6 +151,14 @@ body {
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
+}
+
+.blogGallery {
+  grid-template-areas: none;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: auto;
+  align-items: start;
+  margin-top: clamp(48px, 8vw, 108px);
 }
 
 .tile {
@@ -152,17 +207,16 @@ body {
 }
 
 .photoNote {
-  position: absolute;
-  top: 100%;
-  left: 0;
+  position: relative;
+  display: inline-block;
   z-index: 5;
-  margin: 0;
+  max-width: 100%;
+  margin: 10px 0 0;
   color: #52606d;
   font-family: inherit;
   font-size: clamp(0.78rem, 1.3vw, 0.95rem);
   letter-spacing: 0.01em;
   line-height: 1.2;
-  white-space: nowrap;
 }
 
 .tile:nth-child(even) .photoNote {
