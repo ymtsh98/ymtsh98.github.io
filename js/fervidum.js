@@ -614,15 +614,6 @@ const initializeTouchEffects = () => {
   let effectsReady = false;
   let effectActive = false;
 
-  const cancelForViewportMovement = () => {
-    if (!sweepCanvas?.classList.contains("is-active") && !sweepCanvas?.classList.contains("is-restoring")) {
-      return;
-    }
-
-    finishFervidumExit();
-    effectActive = false;
-  };
-
   const prepareEffects = () => {
     if (effectsReady) {
       return;
@@ -656,16 +647,6 @@ const initializeTouchEffects = () => {
     resetFervidum();
     effectActive = false;
   });
-
-  // Stop the canvas before a touch scroll or pinch can move the viewport.
-  window.addEventListener("scroll", cancelForViewportMovement, { passive: true });
-  window.visualViewport?.addEventListener("resize", cancelForViewportMovement, { passive: true });
-  window.visualViewport?.addEventListener("scroll", cancelForViewportMovement, { passive: true });
-  window.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "touch" && !event.isPrimary) {
-      cancelForViewportMovement();
-    }
-  }, { passive: true });
 };
 
 if (canUseHoverEffects) {
