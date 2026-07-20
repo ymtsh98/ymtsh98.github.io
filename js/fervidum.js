@@ -504,30 +504,24 @@ const waveFragmentShader = `
   uniform float u_time;
   uniform float u_strength;
 
-  float hash(vec2 point) {
-    return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453123);
-  }
-
-  float noise(vec2 point) {
-    vec2 cell = floor(point);
-    vec2 local = fract(point);
-    vec2 smooth = local * local * (3.0 - 2.0 * local);
-    float lower = mix(hash(cell), hash(cell + vec2(1.0, 0.0)), smooth.x);
-    float upper = mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), smooth.x);
-
-    return mix(lower, upper, smooth.y);
+  float heatNoise(float position) {
+    return 0.5
+      + sin(position * 17.0) * 0.27
+      + sin(position * 31.0 + 3.0) * 0.14
+      + sin(position * 7.0 + 1.0) * 0.09;
   }
 
   void main() {
-    float time = u_time * 0.18;
-    float broad = noise(vec2(v_uv.x * 2.8, v_uv.y * 7.5 - time));
-    float detail = noise(vec2(v_uv.x * 8.0 + 10.8, v_uv.y * 19.0 - time * 2.2));
-    float ripples = sin(v_uv.y * 52.0 - time * 15.0 + broad * 7.0);
-    float horizontal = (broad - 0.5) * 0.95 + (detail - 0.5) * 0.45 + ripples * 0.32;
-    float vertical = noise(vec2(v_uv.x * 5.5 - 3.2, v_uv.y * 12.0 - time * 1.35)) - 0.5;
+    // A time-scrolled distortion field gives the image a continuous heat-haze flow.
+    float time = u_time * 0.42;
+    float column = sin(v_uv.x * 7.0 + time * 2.0) * 0.12;
+    float horizontal = heatNoise(v_uv.y * 5.8 - time + column) - 0.5;
+    float vertical = heatNoise(v_uv.y * 8.6 - time * 1.38 + column * 0.6) - 0.5;
+    float lowerFalloff = 1.0 - smoothstep(0.0, 1.0, v_uv.y);
+    float pulse = 0.78 + sin(time * 1.6) * 0.22;
     vec2 offset = vec2(
-      horizontal * u_strength / u_resolution.x,
-      vertical * u_strength * 0.33 / u_resolution.y
+      horizontal * u_strength * lowerFalloff * pulse / u_resolution.x,
+      vertical * u_strength * lowerFalloff * pulse * 0.22 / u_resolution.y
     );
     vec2 distortedUv = clamp(v_uv + offset, vec2(0.001), vec2(0.999));
 
