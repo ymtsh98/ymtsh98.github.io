@@ -514,9 +514,9 @@ const waveFragmentShader = `
   void main() {
     // A time-scrolled distortion field gives the image a continuous heat-haze flow.
     float time = u_time * 0.42;
-    float column = sin(v_uv.x * 7.0 + time * 2.0) * 0.12;
-    float horizontal = heatNoise(v_uv.y * 5.8 - time + column) - 0.5;
-    float vertical = heatNoise(v_uv.y * 8.6 - time * 1.38 + column * 0.6) - 0.5;
+    float column = sin(v_uv.x * 11.0 + time * 2.0) * 0.08;
+    float horizontal = heatNoise(v_uv.y * 8.8 - time + column) - 0.5;
+    float vertical = heatNoise(v_uv.y * 13.2 - time * 1.38 + column * 0.6) - 0.5;
     float lowerFalloff = 1.0 - smoothstep(0.0, 1.0, v_uv.y);
     vec2 offset = vec2(
       horizontal * u_strength * lowerFalloff / u_resolution.x,
@@ -623,7 +623,7 @@ const uploadWaveTexture = (layer) => {
 
     source.width = layer.canvas.width;
     source.height = layer.canvas.height;
-    context.drawImage(layer.image, 0, 0, source.width, source.height);
+    context.drawImage(layer.textureImage, 0, 0, source.width, source.height);
 
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -770,8 +770,10 @@ const createWaveLayers = () => {
   const images = document.querySelectorAll(".gallery img");
 
   const createWaveLayer = (image, imageIndex) => {
-    if (!image.complete || image.naturalWidth === 0) {
-      image.addEventListener("load", () => {
+    const textureImage = window.fervidumLocalTexture || image;
+
+    if (!textureImage.complete || textureImage.naturalWidth === 0) {
+      textureImage.addEventListener("load", () => {
         createWaveLayer(image, imageIndex);
       }, { once: true });
 
@@ -790,6 +792,7 @@ const createWaveLayers = () => {
       imageIndex,
       pixelScale: 1,
       renderer: undefined,
+      textureImage,
       width: 0
     };
 
@@ -824,6 +827,10 @@ const createWaveLayers = () => {
     });
 
     waveLayers.push(layer);
+
+    if (document.body.classList.contains("fervidumWarpActive")) {
+      startWave();
+    }
   };
 
   images.forEach(createWaveLayer);
