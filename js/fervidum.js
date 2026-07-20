@@ -457,7 +457,8 @@ const createWaveLayers = () => {
       return;
     }
 
-    const host = image.parentElement;
+    const tile = image.parentElement;
+    const host = document.createElement("div");
     const wave = document.createElement("div");
     const duration = 6200 + (imageIndex % 4) * 700;
     const sliceCount = clamp(
@@ -469,7 +470,9 @@ const createWaveLayers = () => {
       ? Math.max(0.45, image.naturalHeight / image.naturalWidth)
       : 1;
 
-    host.classList.add("fervidumWarpHost");
+    host.className = "fervidumWarpHost";
+    tile.insertBefore(host, image);
+    host.appendChild(image);
     image.classList.add("fervidumSource");
 
     wave.className = "fervidumWave";
