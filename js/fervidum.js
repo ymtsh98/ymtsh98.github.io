@@ -27,8 +27,6 @@ let cancelGridRewrite;
 let connectionCanvas;
 let connectionContext;
 let connectionFrame;
-let connectionBitmapWidth = 0;
-let connectionBitmapHeight = 0;
 
 const createSweep = () => {
   sweepCanvas = document.createElement("canvas");
@@ -124,22 +122,11 @@ const drawConnections = () => {
   connectionFrame = undefined;
 
   const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const { width, height } = connectionCanvas.getBoundingClientRect();
+  const width = window.innerWidth;
+  const height = window.innerHeight;
 
-  if (width === 0 || height === 0) {
-    return;
-  }
-
-  const bitmapWidth = Math.round(width * pixelRatio);
-  const bitmapHeight = Math.round(height * pixelRatio);
-
-  if (bitmapWidth !== connectionBitmapWidth || bitmapHeight !== connectionBitmapHeight) {
-    connectionCanvas.width = bitmapWidth;
-    connectionCanvas.height = bitmapHeight;
-    connectionBitmapWidth = bitmapWidth;
-    connectionBitmapHeight = bitmapHeight;
-  }
-
+  connectionCanvas.width = Math.round(width * pixelRatio);
+  connectionCanvas.height = Math.round(height * pixelRatio);
   connectionContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   connectionContext.clearRect(0, 0, width, height);
 
@@ -173,7 +160,8 @@ const scheduleConnections = () => {
 };
 
 const createConnections = () => {
-  if (window.matchMedia("(pointer: coarse)").matches) {
+  // Temporary mobile safeguard: remove this guard to restore mobile connection lines.
+  if (window.matchMedia("(max-width: 760px)").matches) {
     return;
   }
 
@@ -201,8 +189,6 @@ const createConnections = () => {
 
   window.addEventListener("resize", scheduleConnections, { passive: true });
   window.addEventListener("scroll", scheduleConnections, { passive: true });
-  window.visualViewport?.addEventListener("resize", scheduleConnections, { passive: true });
-  window.visualViewport?.addEventListener("scroll", scheduleConnections, { passive: true });
   document.addEventListener("load", scheduleConnections, true);
   scheduleConnections();
 };
@@ -559,37 +545,33 @@ const resetFervidum = () => {
   startGridRestore();
 };
 
-const canUseHoverEffects = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+createSweep();
+createWaveLayers();
+createConnections();
 
-if (canUseHoverEffects) {
-  createSweep();
-  createWaveLayers();
-  createConnections();
+fervidumTiles.forEach((tile) => {
+  let completeTimer;
+  let warpTimer;
 
-  fervidumTiles.forEach((tile) => {
-    let completeTimer;
-    let warpTimer;
+  tile.addEventListener("mouseenter", () => {
+    clearTimeout(completeTimer);
+    clearTimeout(warpTimer);
 
-    tile.addEventListener("mouseenter", () => {
-      clearTimeout(completeTimer);
-      clearTimeout(warpTimer);
+    startFervidum();
 
-      startFervidum();
+    warpTimer = setTimeout(() => {
+      document.body.classList.add("fervidumWarpActive");
+    }, warpDelay);
 
-      warpTimer = setTimeout(() => {
-        document.body.classList.add("fervidumWarpActive");
-      }, warpDelay);
-
-      completeTimer = setTimeout(() => {
-        document.body.classList.add("fervidumComplete");
-      }, duration);
-    });
-
-    tile.addEventListener("mouseleave", () => {
-      clearTimeout(completeTimer);
-      clearTimeout(warpTimer);
-
-      resetFervidum();
-    });
+    completeTimer = setTimeout(() => {
+      document.body.classList.add("fervidumComplete");
+    }, duration);
   });
-}
+
+  tile.addEventListener("mouseleave", () => {
+    clearTimeout(completeTimer);
+    clearTimeout(warpTimer);
+
+    resetFervidum();
+  });
+});
