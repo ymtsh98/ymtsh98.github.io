@@ -1,7 +1,7 @@
 const fervidumTiles = document.querySelectorAll(".fervidumTile");
-// Avoid creating hover-only canvases and image slices on touch devices, including landscape iPhones.
 const canUseHoverEffects = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-const canUseTouchEffects = window.matchMedia("(pointer: coarse)").matches;
+// Treat every non-hover layout as touch, including browsers that omit pointer capability details.
+const canUseTouchEffects = !canUseHoverEffects;
 const duration = 5000;
 const sweepDuration = 4000;
 const restoreFadeDuration = 460;
@@ -571,6 +571,8 @@ const createWaveRenderer = (canvas) => {
     alpha: true,
     antialias: false,
     premultipliedAlpha: false,
+    // Keep the last complete frame visible between 30fps renders on mobile Safari.
+    preserveDrawingBuffer: true,
     powerPreference: "low-power"
   });
   const program = gl && createWaveProgram(gl);
@@ -733,15 +735,29 @@ const renderWaves = (now) => {
 };
 
 const startWave = () => {
-  if (waveLayers.length === 0) {
-    return;
+  const availableLayers = waveLayers.filter((layer) => (
+    layer.available && layer.canvas.width > 0 && layer.canvas.height > 0
+  ));
+
+  if (availableLayers.length === 0) {
+    return false;
   }
 
   cancelAnimationFrame(waveFrame);
   clearTimeout(waveClearTimer);
   waveStartTime = performance.now();
   waveLastRender = 0;
-  renderWaves(waveStartTime);
+  // Draw before making the canvas visible so activation cannot flash a blank frame.
+  availableLayers.forEach((layer) => renderWaveLayer(layer, waveStartTime));
+
+  if (!availableLayers.some((layer) => layer.available)) {
+    return false;
+  }
+
+  waveLastRender = waveStartTime;
+  waveFrame = requestAnimationFrame(renderWaves);
+
+  return true;
 };
 
 const clearWaveCanvases = () => {
@@ -893,8 +909,9 @@ const initializeHoverEffects = () => {
       startFervidum();
 
       warpTimer = setTimeout(() => {
-        document.body.classList.add("fervidumWarpActive");
-        startWave();
+        if (startWave()) {
+          document.body.classList.add("fervidumWarpActive");
+        }
       }, warpDelay);
 
       completeTimer = setTimeout(() => {
@@ -914,6 +931,7 @@ const initializeHoverEffects = () => {
 const initializeTouchEffects = () => {
   let effectsReady = false;
   let effectActive = false;
+  let lastTouchActivation = Number.NEGATIVE_INFINITY;
 
   const prepareEffects = () => {
     if (effectsReady) {
@@ -926,18 +944,45 @@ const initializeTouchEffects = () => {
     effectsReady = true;
   };
 
+  const activateTouchEffect = () => {
+    prepareEffects();
+    startFervidum(false);
+
+    if (!startWave()) {
+      // Never hide the source image when WebGL is unavailable.
+      finishFervidumExit();
+      return;
+    }
+
+    // Keep touch feedback inside the image: a full-screen sweep reads as a pulse while pinching.
+    document.body.classList.add("fervidumWarpActive");
+    effectActive = true;
+  };
+
   fervidumTiles.forEach((tile) => {
     const image = tile.querySelector(".image");
 
+    image?.addEventListener("pointerup", (event) => {
+      if (event.pointerType !== "touch") {
+        return;
+      }
+
+      lastTouchActivation = performance.now();
+      activateTouchEffect();
+    });
+
     image?.addEventListener("click", () => {
-      prepareEffects();
-      // Keep touch feedback inside the image: a full-screen sweep reads as a pulse while pinching.
-      startFervidum(false);
-      document.body.classList.add("fervidumWarpActive");
-      startWave();
-      effectActive = true;
+      // Pointer events are not available on older mobile Safari; ignore its synthetic click otherwise.
+      if (performance.now() - lastTouchActivation < 700) {
+        return;
+      }
+
+      activateTouchEffect();
     });
   });
+
+  // Allocate the single renderer once the image is ready, so the first tap has an animation to show.
+  window.addEventListener("load", prepareEffects, { once: true });
 
   document.addEventListener("click", (event) => {
     if (!effectActive || !(event.target instanceof Element)) {

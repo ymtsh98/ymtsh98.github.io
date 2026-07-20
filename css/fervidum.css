@@ -56,6 +56,7 @@ body.fervidumComplete {
 .fervidumSource {
   position: relative;
   z-index: 1;
+  touch-action: manipulation;
   transition: opacity 220ms ease-in-out;
 }
 
@@ -70,6 +71,7 @@ body.fervidumComplete {
   overflow: hidden;
   pointer-events: none;
   transition: opacity 220ms ease-in-out;
+  will-change: opacity;
 }
 
 body.fervidumWarpActive .fervidumSource {
