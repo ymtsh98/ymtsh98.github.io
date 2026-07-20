@@ -334,6 +334,10 @@ test("touch starts both the background transition and a rendered WebGL haze", ()
 
   (harness.documentListeners.get("click") || []).forEach((listener) => listener({ target: harness.blank }));
   assert.ok(harness.body.classList.contains("fervidumExit"));
+  assert.ok(harness.body.classList.contains("fervidumWarpActive"));
+
+  harness.runFrames(3800);
+  assert.ok(!harness.body.classList.contains("fervidumWarpActive"));
 });
 
 test("a touch pointer event is not restarted by its follow-up click and survives scrolling", () => {
@@ -352,16 +356,13 @@ test("a touch pointer event is not restarted by its follow-up click and survives
   assert.ok(harness.body.classList.contains("fervidumWarpActive"));
 });
 
-test("the active haze never hides its source image between WebGL frames", () => {
-  assert.doesNotMatch(
-    styles,
-    /body\.fervidumWarpActive\s+\.fervidumSource\s*\{[^}]*opacity\s*:/s
-  );
-  assert.match(styles, /body\.fervidumWarpActive\s+\.fervidumWave\s*\{[^}]*opacity\s*:\s*1/s);
+test("the active haze displays one image surface at a time", () => {
   assert.match(
     styles,
-    /@media\s*\(hover:\s*hover\)\s*and\s*\(pointer:\s*fine\)\s*\{[^}]*body\.fervidumWarpActive\s+\.fervidumTile::before\s*\{[^}]*opacity\s*:\s*0/s
+    /body\.fervidumWarpActive\s+\.fervidumSource\s*\{[^}]*opacity\s*:\s*0/s
   );
+  assert.match(styles, /body\.fervidumWarpActive\s+\.fervidumWave\s*\{[^}]*opacity\s*:\s*1/s);
+  assert.doesNotMatch(styles, /\.fervidumWave\s*\{[^}]*transition\s*:/s);
 });
 
 test("the heat haze fades to the original image at its edges", () => {

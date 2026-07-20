@@ -56,6 +56,7 @@ body.fervidumComplete {
 .fervidumSource {
   position: relative;
   z-index: 1;
+  opacity: 1;
   touch-action: manipulation;
 }
 
@@ -69,26 +70,13 @@ body.fervidumComplete {
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
-  transition: opacity 220ms ease-in-out;
   will-change: opacity;
+}
+
+body.fervidumWarpActive .fervidumSource {
+  opacity: 0;
 }
 
 body.fervidumWarpActive .fervidumWave {
   opacity: 1;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  body.fervidumWarpActive .fervidumTile::before {
-    opacity: 0;
-  }
-}
-
-body.fervidumExit .fervidumWave {
-  opacity: 0;
-  transition: opacity 260ms ease-out;
-}
-
-body.fervidumReset .fervidumWave {
-  opacity: 0;
-  transition: none;
 }

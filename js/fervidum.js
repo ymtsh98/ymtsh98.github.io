@@ -35,6 +35,7 @@ let waveStartTime = 0;
 let waveLastRender = 0;
 let waveResizeFrame;
 let waveClearTimer;
+let waveFadeStart;
 const waveLayers = [];
 const svgNamespace = "http://www.w3.org/2000/svg";
 
@@ -718,9 +719,19 @@ const renderWaveLayer = (layer, now) => {
   gl.uniform2f(resolutionLocation, layer.canvas.width, layer.canvas.height);
   gl.uniform1f(timeLocation, (now - waveStartTime) / 1000);
   const ramp = easeInOut(clamp((now - waveStartTime) / waveRampDuration, 0, 1));
+  const fade = waveFadeStart === undefined
+    ? 1
+    : 1 - easeInOut(clamp((now - waveFadeStart) / waveFadeDuration, 0, 1));
 
-  gl.uniform1f(strengthLocation, 3.4 * layer.pixelScale * ramp);
+  gl.uniform1f(strengthLocation, 3.4 * layer.pixelScale * ramp * fade);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
+};
+
+const finishWaveFade = () => {
+  waveFrame = undefined;
+  waveFadeStart = undefined;
+  document.body.classList.remove("fervidumWarpActive");
+  clearWaveCanvases();
 };
 
 const renderWaves = (now) => {
@@ -729,9 +740,16 @@ const renderWaves = (now) => {
     return;
   }
 
-  if (now - waveLastRender >= waveFrameInterval) {
+  const fadeComplete = waveFadeStart !== undefined && now - waveFadeStart >= waveFadeDuration;
+
+  if (now - waveLastRender >= waveFrameInterval || fadeComplete) {
     waveLayers.forEach((layer) => renderWaveLayer(layer, now));
     waveLastRender = now;
+  }
+
+  if (fadeComplete) {
+    finishWaveFade();
+    return;
   }
 
   waveFrame = requestAnimationFrame(renderWaves);
@@ -748,6 +766,7 @@ const startWave = () => {
 
   cancelAnimationFrame(waveFrame);
   clearTimeout(waveClearTimer);
+  waveFadeStart = undefined;
   waveStartTime = performance.now();
   waveLastRender = 0;
   // Draw before making the canvas visible so activation cannot flash a blank frame.
@@ -775,14 +794,23 @@ const stopWave = () => {
   cancelAnimationFrame(waveFrame);
   waveFrame = undefined;
   clearTimeout(waveClearTimer);
+  waveFadeStart = undefined;
   clearWaveCanvases();
 };
 
 const fadeOutWave = () => {
-  cancelAnimationFrame(waveFrame);
-  waveFrame = undefined;
   clearTimeout(waveClearTimer);
-  waveClearTimer = window.setTimeout(clearWaveCanvases, waveFadeDuration);
+
+  if (!document.body.classList.contains("fervidumWarpActive")) {
+    stopWave();
+    return;
+  }
+
+  waveFadeStart = performance.now();
+
+  if (!waveFrame) {
+    waveFrame = requestAnimationFrame(renderWaves);
+  }
 };
 
 const createWaveLayers = () => {
