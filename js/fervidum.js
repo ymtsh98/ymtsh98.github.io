@@ -518,10 +518,9 @@ const waveFragmentShader = `
     float horizontal = heatNoise(v_uv.y * 5.8 - time + column) - 0.5;
     float vertical = heatNoise(v_uv.y * 8.6 - time * 1.38 + column * 0.6) - 0.5;
     float lowerFalloff = 1.0 - smoothstep(0.0, 1.0, v_uv.y);
-    float pulse = 0.78 + sin(time * 1.6) * 0.22;
     vec2 offset = vec2(
-      horizontal * u_strength * lowerFalloff * pulse / u_resolution.x,
-      vertical * u_strength * lowerFalloff * pulse * 0.22 / u_resolution.y
+      horizontal * u_strength * lowerFalloff / u_resolution.x,
+      vertical * u_strength * lowerFalloff * 0.22 / u_resolution.y
     );
     vec2 distortedUv = clamp(v_uv + offset, vec2(0.001), vec2(0.999));
 
