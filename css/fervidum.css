@@ -1,0 +1,152 @@
+@property --fervidumClock {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes fervidumClockSweep {
+  from {
+    --fervidumClock: 0deg;
+  }
+
+  to {
+    --fervidumClock: 360deg;
+  }
+}
+
+@keyframes fervidumHeatHaze {
+  0%,
+  14%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  27% {
+    transform: translate3d(var(--fervidumHazeDriftA), 0, 0);
+  }
+
+  41% {
+    transform: translate3d(var(--fervidumHazeDriftB), 0, 0);
+  }
+
+  58% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  72% {
+    transform: translate3d(var(--fervidumHazeDriftC), 0, 0);
+  }
+
+  86% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+:root {
+  --fervidumColor: #fd9e44ff;
+}
+
+body {
+  position: relative;
+  isolation: isolate;
+  overflow-x: hidden;
+  background-color: #f4f6f8;
+}
+
+.page {
+  background-color: transparent;
+}
+
+.fervidumSweep {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100vw;
+  height: 100vh;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms linear;
+}
+
+.fervidumSweep.is-active {
+  opacity: 1;
+}
+
+body.fervidumComplete {
+  background-color: #f4f6f8;
+}
+
+.gallery {
+  position: relative;
+  z-index: 1;
+}
+
+.fervidumTile {
+  position: relative;
+}
+
+.fervidumWarpHost {
+  position: relative;
+}
+
+.fervidumSource {
+  position: relative;
+  z-index: 1;
+  transition: opacity 0s;
+}
+
+.fervidumWave {
+  position: absolute;
+  inset: var(--photo-margin, 0px);
+  z-index: 2;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 0s;
+}
+
+.fervidumWaveSlice {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  clip-path: inset(
+    -4px
+    calc(var(--fervidumSliceRight) - 1px)
+    -4px
+    calc(var(--fervidumSliceLeft) - 1px)
+  );
+}
+
+.fervidumHazeImage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+}
+
+body.fervidumWarpActive .fervidumHazeImage {
+  animation: fervidumHeatHaze var(--fervidumHazeDuration) ease-in-out calc(
+    var(--fervidumSliceDelay) + var(--fervidumWaveStartDelay)
+  ) infinite;
+}
+
+body.fervidumWarpActive .fervidumSource {
+  opacity: 0;
+}
+
+body.fervidumWarpActive .fervidumWave {
+  opacity: 1;
+}
+
+body.fervidumReset .fervidumSource {
+  opacity: 1;
+  transition: none;
+}
+
+body.fervidumReset .fervidumWave {
+  opacity: 0;
+  transition: none;
+}
