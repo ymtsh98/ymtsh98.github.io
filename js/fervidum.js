@@ -1,4 +1,5 @@
 const fervidumTiles = document.querySelectorAll(".fervidumTile");
+const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 const canUseHoverEffects = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 // Diagnostic switches: draw the desktop canvas without advancing its heat-haze
 // shader, so its surface can be inspected separately from the distortion.
@@ -17,6 +18,8 @@ const maxWavePixels = 1200000;
 const simulationCellSize = 8;
 const maxSimulationSide = 176;
 const connectionEdgeOffsetMax = 0.38;
+const defaultThemeColor = "#f4f6f8";
+const fervidumThemeColor = "#fd9e44";
 
 let sweepCanvas;
 let sweepContext;
@@ -63,6 +66,10 @@ const createSweep = () => {
 const easeInOut = (value) => value * value * (3 - 2 * value);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const setFervidumThemeColor = (color) => {
+  themeColorMeta?.setAttribute("content", color);
+};
 
 const getSweepViewportSize = () => {
   const viewport = window.visualViewport;
@@ -584,6 +591,7 @@ const finishFervidumExit = () => {
     "fervidumExit",
     "fervidumReset"
   );
+  setFervidumThemeColor(defaultThemeColor);
 };
 
 const startGridRestore = () => {
@@ -1018,6 +1026,7 @@ const startFervidum = (includeSweep = true) => {
   document.body.offsetWidth;
 
   document.body.classList.add("fervidumActive");
+  setFervidumThemeColor(fervidumThemeColor);
 
   if (includeSweep) {
     startSweep();

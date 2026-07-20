@@ -31,6 +31,7 @@ class FakeElement {
     this.eventListeners = new Map();
     this.parentElement = undefined;
     this.style = {};
+    this.attributes = new Map();
   }
 
   addEventListener(type, listener) {
@@ -74,7 +75,13 @@ class FakeElement {
     return undefined;
   }
 
-  setAttribute() {}
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+
+  getAttribute(name) {
+    return this.attributes.get(name);
+  }
 
   closest(selector) {
     if (selector.includes(".image") && this.classList.contains("image")) {
@@ -185,6 +192,8 @@ const createHarness = ({ webgl }) => {
   body.scrollHeight = 1200;
   Object.defineProperty(body, "offsetWidth", { get: () => 390 });
   const page = new FakeElement();
+  const themeColor = new FakeElement("meta");
+  themeColor.setAttribute("content", "#f4f6f8");
   const tile = new FakeElement("article");
   tile.classList.add("tile", "fervidumTile");
   const image = new FakeElement("img");
@@ -219,7 +228,11 @@ const createHarness = ({ webgl }) => {
       return [];
     },
     querySelector(selector) {
-      return selector === ".page" ? page : undefined;
+      if (selector === ".page") {
+        return page;
+      }
+
+      return selector === 'meta[name="theme-color"]' ? themeColor : undefined;
     },
     createElement(tagName) {
       if (tagName !== "canvas") {
@@ -325,6 +338,7 @@ const createHarness = ({ webgl }) => {
     runFrames,
     runLoad,
     runVisualViewport,
+    themeColor,
     window
   };
 };
@@ -341,6 +355,14 @@ test("touch keeps the background transition running when WebGL is unavailable", 
   assert.ok(harness.body.classList.contains("fervidumActive"));
   assert.ok(!harness.body.classList.contains("fervidumWarpActive"));
   assert.ok(sweep.context2d.fills.some((alpha) => alpha > 0));
+});
+
+test("touch updates the browser theme color while fervidum is active", () => {
+  const harness = createHarness({ webgl: false });
+  harness.runLoad();
+  harness.image.emit("click");
+
+  assert.equal(harness.themeColor.getAttribute("content"), "#fd9e44");
 });
 
 test("touch starts both the background transition and a rendered WebGL haze", () => {
