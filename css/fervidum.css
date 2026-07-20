@@ -56,7 +56,7 @@ body.fervidumComplete {
 .fervidumSource {
   position: relative;
   z-index: 1;
-  transition: opacity 0s;
+  transition: opacity 220ms ease-in-out;
 }
 
 .fervidumWave {
@@ -69,7 +69,7 @@ body.fervidumComplete {
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
-  transition: opacity 0s;
+  transition: opacity 220ms ease-in-out;
 }
 
 body.fervidumWarpActive .fervidumSource {
@@ -82,12 +82,12 @@ body.fervidumWarpActive .fervidumWave {
 
 body.fervidumExit .fervidumSource {
   opacity: 1;
-  transition: none;
+  transition: opacity 260ms ease-out;
 }
 
 body.fervidumExit .fervidumWave {
   opacity: 0;
-  transition: opacity 240ms ease-out;
+  transition: opacity 260ms ease-out;
 }
 
 body.fervidumReset .fervidumSource {

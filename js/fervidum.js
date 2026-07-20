@@ -7,6 +7,8 @@ const sweepDuration = 4000;
 const restoreFadeDuration = 460;
 const warpDelay = 0;
 const waveFrameInterval = 1000 / 30;
+const waveRampDuration = 360;
+const waveFadeDuration = 260;
 const maxWavePixels = 1200000;
 const simulationCellSize = 8;
 const maxSimulationSide = 176;
@@ -32,6 +34,7 @@ let waveFrame;
 let waveStartTime = 0;
 let waveLastRender = 0;
 let waveResizeFrame;
+let waveClearTimer;
 const waveLayers = [];
 const svgNamespace = "http://www.w3.org/2000/svg";
 
@@ -704,7 +707,9 @@ const renderWaveLayer = (layer, now) => {
   gl.uniform1i(imageLocation, 0);
   gl.uniform2f(resolutionLocation, layer.canvas.width, layer.canvas.height);
   gl.uniform1f(timeLocation, (now - waveStartTime) / 1000);
-  gl.uniform1f(strengthLocation, 3.4 * layer.pixelScale);
+  const ramp = easeInOut(clamp((now - waveStartTime) / waveRampDuration, 0, 1));
+
+  gl.uniform1f(strengthLocation, 3.4 * layer.pixelScale * ramp);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 };
 
@@ -728,19 +733,32 @@ const startWave = () => {
   }
 
   cancelAnimationFrame(waveFrame);
+  clearTimeout(waveClearTimer);
   waveStartTime = performance.now();
   waveLastRender = 0;
   renderWaves(waveStartTime);
 };
 
-const stopWave = () => {
-  cancelAnimationFrame(waveFrame);
-  waveFrame = undefined;
+const clearWaveCanvases = () => {
   waveLayers.forEach(({ canvas, renderer }) => {
     renderer.gl.clearColor(0, 0, 0, 0);
     renderer.gl.clear(renderer.gl.COLOR_BUFFER_BIT);
     renderer.gl.viewport(0, 0, canvas.width, canvas.height);
   });
+};
+
+const stopWave = () => {
+  cancelAnimationFrame(waveFrame);
+  waveFrame = undefined;
+  clearTimeout(waveClearTimer);
+  clearWaveCanvases();
+};
+
+const fadeOutWave = () => {
+  cancelAnimationFrame(waveFrame);
+  waveFrame = undefined;
+  clearTimeout(waveClearTimer);
+  waveClearTimer = window.setTimeout(clearWaveCanvases, waveFadeDuration);
 };
 
 const createWaveLayers = () => {
@@ -830,7 +848,7 @@ const startFervidum = () => {
 };
 
 const resetFervidum = () => {
-  stopWave();
+  fadeOutWave();
   document.body.classList.remove(
     "fervidumActive",
     "fervidumComplete",
