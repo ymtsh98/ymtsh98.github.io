@@ -1,5 +1,5 @@
 const fervidumTiles = document.querySelectorAll(".fervidumTile");
-// Temporary mobile safeguard: set this to false to restore mobile connection lines and hover effects.
+// Temporary mobile safeguard: hover effects stay disabled below the mobile breakpoint.
 const isMobileViewport = window.matchMedia("(max-width: 760px)").matches;
 const duration = 5000;
 const sweepDuration = 4000;
@@ -29,6 +29,8 @@ let cancelGridRewrite;
 let connectionCanvas;
 let connectionContext;
 let connectionFrame;
+let connectionBitmapWidth = 0;
+let connectionBitmapHeight = 0;
 
 const createSweep = () => {
   sweepCanvas = document.createElement("canvas");
@@ -45,16 +47,24 @@ const easeInOut = (value) => value * value * (3 - 2 * value);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-const getConnectionHosts = () => Array.from(
+const getConnectionHosts = (canvasBounds) => Array.from(
   document.querySelectorAll(".profileLinks a, .blogLinks, .tile")
 ).map((element) => {
   const rect = element.getBoundingClientRect();
+  const connectionRect = {
+    left: rect.left - canvasBounds.left,
+    top: rect.top - canvasBounds.top,
+    right: rect.right - canvasBounds.left,
+    bottom: rect.bottom - canvasBounds.top,
+    width: rect.width,
+    height: rect.height
+  };
 
   return {
-    rect,
+    rect: connectionRect,
     center: {
-      x: rect.left + rect.width / 2,
-      y: rect.top + rect.height / 2
+      x: connectionRect.left + connectionRect.width / 2,
+      y: connectionRect.top + connectionRect.height / 2
     }
   };
 }).filter(({ rect }) => rect.width > 0 && rect.height > 0);
@@ -123,16 +133,29 @@ const getConnectionEdges = (hosts) => {
 const drawConnections = () => {
   connectionFrame = undefined;
 
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const canvasBounds = connectionCanvas.getBoundingClientRect();
+  const { width, height } = canvasBounds;
 
-  connectionCanvas.width = Math.round(width * pixelRatio);
-  connectionCanvas.height = Math.round(height * pixelRatio);
+  if (width === 0 || height === 0) {
+    return;
+  }
+
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const bitmapWidth = Math.round(width * pixelRatio);
+  const bitmapHeight = Math.round(height * pixelRatio);
+
+  // Keep the bitmap viewport-sized and reuse it during scroll and pinch-zoom.
+  if (bitmapWidth !== connectionBitmapWidth || bitmapHeight !== connectionBitmapHeight) {
+    connectionCanvas.width = bitmapWidth;
+    connectionCanvas.height = bitmapHeight;
+    connectionBitmapWidth = bitmapWidth;
+    connectionBitmapHeight = bitmapHeight;
+  }
+
   connectionContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   connectionContext.clearRect(0, 0, width, height);
 
-  const hosts = getConnectionHosts();
+  const hosts = getConnectionHosts(canvasBounds);
   const ink = getComputedStyle(document.documentElement)
     .getPropertyValue("--connector")
     .trim() || "#4e5f72";
@@ -162,10 +185,6 @@ const scheduleConnections = () => {
 };
 
 const createConnections = () => {
-  if (isMobileViewport) {
-    return;
-  }
-
   connectionCanvas = document.createElement("canvas");
   connectionCanvas.className = "boxConnections";
   connectionCanvas.setAttribute("aria-hidden", "true");
@@ -190,6 +209,8 @@ const createConnections = () => {
 
   window.addEventListener("resize", scheduleConnections, { passive: true });
   window.addEventListener("scroll", scheduleConnections, { passive: true });
+  window.visualViewport?.addEventListener("resize", scheduleConnections, { passive: true });
+  window.visualViewport?.addEventListener("scroll", scheduleConnections, { passive: true });
   document.addEventListener("load", scheduleConnections, true);
   scheduleConnections();
 };
