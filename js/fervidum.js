@@ -1,4 +1,6 @@
 const fervidumTiles = document.querySelectorAll(".fervidumTile");
+// Temporary mobile safeguard: set this to false to restore mobile connection lines and hover effects.
+const isMobileViewport = window.matchMedia("(max-width: 760px)").matches;
 const duration = 5000;
 const sweepDuration = 4000;
 const restoreFadeDuration = 460;
@@ -160,8 +162,7 @@ const scheduleConnections = () => {
 };
 
 const createConnections = () => {
-  // Temporary mobile safeguard: remove this guard to restore mobile connection lines.
-  if (window.matchMedia("(max-width: 760px)").matches) {
+  if (isMobileViewport) {
     return;
   }
 
@@ -545,11 +546,18 @@ const resetFervidum = () => {
   startGridRestore();
 };
 
-createSweep();
-createWaveLayers();
+if (!isMobileViewport) {
+  createSweep();
+  createWaveLayers();
+}
+
 createConnections();
 
 fervidumTiles.forEach((tile) => {
+  if (isMobileViewport) {
+    return;
+  }
+
   let completeTimer;
   let warpTimer;
 
