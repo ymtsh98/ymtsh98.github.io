@@ -26,11 +26,9 @@ let sweepStartTime = 0;
 let lastSweepRender = 0;
 let restoreFadeTimer;
 let cancelGridRewrite;
-let connectionCanvas;
-let connectionContext;
+let connectionLayer;
 let connectionFrame;
-let connectionBitmapWidth = 0;
-let connectionBitmapHeight = 0;
+const svgNamespace = "http://www.w3.org/2000/svg";
 
 const createSweep = () => {
   sweepCanvas = document.createElement("canvas");
@@ -47,27 +45,42 @@ const easeInOut = (value) => value * value * (3 - 2 * value);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-const getConnectionHosts = (canvasBounds) => Array.from(
-  document.querySelectorAll(".profileLinks a, .blogLinks, .tile")
-).map((element) => {
-  const rect = element.getBoundingClientRect();
-  const connectionRect = {
-    left: rect.left - canvasBounds.left,
-    top: rect.top - canvasBounds.top,
-    right: rect.right - canvasBounds.left,
-    bottom: rect.bottom - canvasBounds.top,
-    width: rect.width,
-    height: rect.height
-  };
+const getConnectionHosts = () => {
+  const pageX = window.scrollX;
+  const pageY = window.scrollY;
+
+  return Array.from(
+    document.querySelectorAll(".profileLinks a, .blogLinks, .tile")
+  ).map((element) => {
+    const rect = element.getBoundingClientRect();
+    const connectionRect = {
+      left: rect.left + pageX,
+      top: rect.top + pageY,
+      right: rect.right + pageX,
+      bottom: rect.bottom + pageY,
+      width: rect.width,
+      height: rect.height
+    };
+
+    return {
+      rect: connectionRect,
+      center: {
+        x: connectionRect.left + connectionRect.width / 2,
+        y: connectionRect.top + connectionRect.height / 2
+      }
+    };
+  }).filter(({ rect }) => rect.width > 0 && rect.height > 0);
+};
+
+const getConnectionLayerSize = () => {
+  const root = document.documentElement;
+  const body = document.body;
 
   return {
-    rect: connectionRect,
-    center: {
-      x: connectionRect.left + connectionRect.width / 2,
-      y: connectionRect.top + connectionRect.height / 2
-    }
+    width: Math.max(root.clientWidth, root.scrollWidth, body.clientWidth, body.scrollWidth),
+    height: Math.max(root.clientHeight, root.scrollHeight, body.clientHeight, body.scrollHeight)
   };
-}).filter(({ rect }) => rect.width > 0 && rect.height > 0);
+};
 
 const boxDistance = (first, second) => {
   const horizontalGap = Math.max(
@@ -133,49 +146,34 @@ const getConnectionEdges = (hosts) => {
 const drawConnections = () => {
   connectionFrame = undefined;
 
-  const canvasBounds = connectionCanvas.getBoundingClientRect();
-  const { width, height } = canvasBounds;
-
-  if (width === 0 || height === 0) {
-    return;
-  }
-
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const bitmapWidth = Math.round(width * pixelRatio);
-  const bitmapHeight = Math.round(height * pixelRatio);
-
-  // Keep the bitmap viewport-sized and reuse it during scroll and pinch-zoom.
-  if (bitmapWidth !== connectionBitmapWidth || bitmapHeight !== connectionBitmapHeight) {
-    connectionCanvas.width = bitmapWidth;
-    connectionCanvas.height = bitmapHeight;
-    connectionBitmapWidth = bitmapWidth;
-    connectionBitmapHeight = bitmapHeight;
-  }
-
-  connectionContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  connectionContext.clearRect(0, 0, width, height);
-
-  const hosts = getConnectionHosts(canvasBounds);
+  const { width, height } = getConnectionLayerSize();
+  const hosts = getConnectionHosts();
   const ink = getComputedStyle(document.documentElement)
     .getPropertyValue("--connector")
     .trim() || "#4e5f72";
+  const paths = document.createDocumentFragment();
 
-  connectionContext.globalAlpha = 0.84;
-  connectionContext.strokeStyle = ink;
-  connectionContext.lineCap = "round";
-  connectionContext.lineWidth = 2;
+  connectionLayer.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  connectionLayer.setAttribute("width", width);
+  connectionLayer.setAttribute("height", height);
+  connectionLayer.style.width = `${width}px`;
+  connectionLayer.style.height = `${height}px`;
 
   getConnectionEdges(hosts).forEach(({ from, to }) => {
     const start = getBorderPoint(hosts[from], hosts[to].center);
     const end = getBorderPoint(hosts[to], hosts[from].center);
+    const path = document.createElementNS(svgNamespace, "path");
 
-    connectionContext.beginPath();
-    connectionContext.moveTo(start.x, start.y);
-    connectionContext.lineTo(end.x, end.y);
-    connectionContext.stroke();
+    path.setAttribute("d", `M ${start.x} ${start.y} L ${end.x} ${end.y}`);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", ink);
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("opacity", "0.84");
+    paths.appendChild(path);
   });
 
-  connectionContext.globalAlpha = 1;
+  connectionLayer.replaceChildren(paths);
 };
 
 const scheduleConnections = () => {
@@ -185,11 +183,10 @@ const scheduleConnections = () => {
 };
 
 const createConnections = () => {
-  connectionCanvas = document.createElement("canvas");
-  connectionCanvas.className = "boxConnections";
-  connectionCanvas.setAttribute("aria-hidden", "true");
-  connectionContext = connectionCanvas.getContext("2d");
-  document.body.insertAdjacentElement("afterbegin", connectionCanvas);
+  connectionLayer = document.createElementNS(svgNamespace, "svg");
+  connectionLayer.classList.add("boxConnections");
+  connectionLayer.setAttribute("aria-hidden", "true");
+  document.body.insertAdjacentElement("afterbegin", connectionLayer);
 
   const resizeObserver = new ResizeObserver(scheduleConnections);
   const observeConnectionHosts = () => {
@@ -208,9 +205,6 @@ const createConnections = () => {
   });
 
   window.addEventListener("resize", scheduleConnections, { passive: true });
-  window.addEventListener("scroll", scheduleConnections, { passive: true });
-  window.visualViewport?.addEventListener("resize", scheduleConnections, { passive: true });
-  window.visualViewport?.addEventListener("scroll", scheduleConnections, { passive: true });
   document.addEventListener("load", scheduleConnections, true);
   scheduleConnections();
 };
