@@ -10,6 +10,9 @@ const waveFrameInterval = 1000 / 30;
 const waveRampDuration = 360;
 const waveFadeDuration = 260;
 const maxWavePixels = 1200000;
+// Physical pixels copied around each WebGL texture so sampling beyond an edge
+// never exposes the canvas's transparent/filtered boundary.
+const texturePadding = 8;
 const simulationCellSize = 8;
 const maxSimulationSide = 176;
 
@@ -502,6 +505,8 @@ const waveFragmentShader = `
   varying vec2 v_uv;
   uniform sampler2D u_image;
   uniform vec2 u_resolution;
+  uniform vec2 u_textureInset;
+  uniform vec2 u_textureScale;
   uniform float u_time;
   uniform float u_strength;
 
@@ -523,12 +528,12 @@ const waveFragmentShader = `
       horizontal * u_strength * lowerFalloff / u_resolution.x,
       vertical * u_strength * lowerFalloff * 0.22 / u_resolution.y
     );
-    // Fade distortion out at the image edge instead of stretching edge texels into a frame.
-    float edgeDistance = min(min(v_uv.x, v_uv.y), min(1.0 - v_uv.x, 1.0 - v_uv.y));
-    float edgeFade = smoothstep(0.0, 0.028, edgeDistance);
-    vec2 distortedUv = v_uv + offset * edgeFade;
+    vec2 distortedUv = v_uv + offset;
+    // u_image has replicated edge pixels around the source image.  Sampling
+    // its interior keeps the visual size fixed while avoiding a canvas border.
+    vec2 textureUv = u_textureInset + distortedUv * u_textureScale;
 
-    gl_FragColor = texture2D(u_image, distortedUv);
+    gl_FragColor = texture2D(u_image, textureUv);
   }
 `;
 
@@ -611,6 +616,8 @@ const createWaveRenderer = (canvas) => {
     positionLocation: gl.getAttribLocation(program, "a_position"),
     imageLocation: gl.getUniformLocation(program, "u_image"),
     resolutionLocation: gl.getUniformLocation(program, "u_resolution"),
+    textureInsetLocation: gl.getUniformLocation(program, "u_textureInset"),
+    textureScaleLocation: gl.getUniformLocation(program, "u_textureScale"),
     timeLocation: gl.getUniformLocation(program, "u_time"),
     strengthLocation: gl.getUniformLocation(program, "u_strength")
   };
@@ -620,16 +627,46 @@ const uploadWaveTexture = (layer) => {
   const { gl, texture } = layer.renderer;
 
   try {
+    const imageCanvas = document.createElement("canvas");
+    const imageContext = imageCanvas.getContext("2d", { alpha: false });
     const source = document.createElement("canvas");
     const context = source.getContext("2d", { alpha: false });
 
-    if (!context) {
+    if (!imageContext || !context) {
       return false;
     }
 
-    source.width = layer.canvas.width;
-    source.height = layer.canvas.height;
-    context.drawImage(layer.textureImage, 0, 0, source.width, source.height);
+    const imageWidth = layer.canvas.width;
+    const imageHeight = layer.canvas.height;
+
+    imageCanvas.width = imageWidth;
+    imageCanvas.height = imageHeight;
+    imageContext.drawImage(layer.textureImage, 0, 0, imageWidth, imageHeight);
+
+    source.width = imageWidth + texturePadding * 2;
+    source.height = imageHeight + texturePadding * 2;
+    context.drawImage(imageCanvas, texturePadding, texturePadding);
+
+    // Repeat each source edge into the texture padding.  This is deliberately
+    // done in texture pixels, not CSS pixels, so the displayed image never
+    // grows or shifts when the hover animation starts.
+    context.drawImage(imageCanvas, 0, 0, 1, imageHeight, 0, texturePadding, texturePadding, imageHeight);
+    context.drawImage(imageCanvas, imageWidth - 1, 0, 1, imageHeight, imageWidth + texturePadding, texturePadding, texturePadding, imageHeight);
+    context.drawImage(imageCanvas, 0, 0, imageWidth, 1, texturePadding, 0, imageWidth, texturePadding);
+    context.drawImage(imageCanvas, 0, imageHeight - 1, imageWidth, 1, texturePadding, imageHeight + texturePadding, imageWidth, texturePadding);
+    context.drawImage(imageCanvas, 0, 0, 1, 1, 0, 0, texturePadding, texturePadding);
+    context.drawImage(imageCanvas, imageWidth - 1, 0, 1, 1, imageWidth + texturePadding, 0, texturePadding, texturePadding);
+    context.drawImage(imageCanvas, 0, imageHeight - 1, 1, 1, 0, imageHeight + texturePadding, texturePadding, texturePadding);
+    context.drawImage(imageCanvas, imageWidth - 1, imageHeight - 1, 1, 1, imageWidth + texturePadding, imageHeight + texturePadding, texturePadding, texturePadding);
+
+    layer.textureInset = {
+      x: texturePadding / source.width,
+      y: texturePadding / source.height
+    };
+    layer.textureScale = {
+      x: imageWidth / source.width,
+      y: imageHeight / source.height
+    };
 
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -700,6 +737,8 @@ const renderWaveLayer = (layer, now) => {
     positionLocation,
     imageLocation,
     resolutionLocation,
+    textureInsetLocation,
+    textureScaleLocation,
     timeLocation,
     strengthLocation
   } = layer.renderer;
@@ -717,6 +756,8 @@ const renderWaveLayer = (layer, now) => {
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.uniform1i(imageLocation, 0);
   gl.uniform2f(resolutionLocation, layer.canvas.width, layer.canvas.height);
+  gl.uniform2f(textureInsetLocation, layer.textureInset.x, layer.textureInset.y);
+  gl.uniform2f(textureScaleLocation, layer.textureScale.x, layer.textureScale.y);
   gl.uniform1f(timeLocation, (now - waveStartTime) / 1000);
   const ramp = easeInOut(clamp((now - waveStartTime) / waveRampDuration, 0, 1));
   const fade = waveFadeStart === undefined
@@ -840,6 +881,8 @@ const createWaveLayers = () => {
       pixelScale: 1,
       renderer: undefined,
       textureImage,
+      textureInset: { x: 0, y: 0 },
+      textureScale: { x: 1, y: 1 },
       width: 0
     };
 
