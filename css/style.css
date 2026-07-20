@@ -148,7 +148,10 @@ a {
   grid-template-areas:
     "feature wide-one"
     "feature wide-two";
-  grid-template-columns: minmax(0, 0.74fr) minmax(0, 1fr);
+  grid-template-columns: var(
+    --image-gallery-columns,
+    minmax(0, 0.74fr) minmax(0, 1fr)
+  );
   align-items: start;
   gap: var(--gallery-gap);
   width: 100%;
@@ -157,11 +160,12 @@ a {
 }
 
 .blogGallery {
+  --gallery-gap: clamp(14px, 1.8vw, 22px);
   grid-template-areas: none;
   grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: auto;
   align-items: start;
-  margin-top: clamp(48px, 8vw, 108px);
+  margin-top: clamp(40px, 6vw, 84px);
 }
 
 .tile {
