@@ -949,14 +949,12 @@ const initializeTouchEffects = () => {
     // A tap keeps the one-shot background-color transition as well as the image-local haze.
     startFervidum();
 
-    if (!startWave()) {
-      // Never hide the source image when WebGL is unavailable.
-      finishFervidumExit();
-      return;
+    if (startWave()) {
+      // Show the image-local haze only after its first complete frame has been rendered.
+      document.body.classList.add("fervidumWarpActive");
     }
 
-    // Keep touch feedback inside the image: a full-screen sweep reads as a pulse while pinching.
-    document.body.classList.add("fervidumWarpActive");
+    // WebGL is optional; the requested background-color transition must always complete.
     effectActive = true;
   };
 
