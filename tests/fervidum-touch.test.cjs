@@ -365,14 +365,11 @@ test("the active haze displays one image surface at a time", () => {
   assert.doesNotMatch(styles, /\.fervidumWave\s*\{[^}]*transition\s*:/s);
 });
 
-test("the heat haze samples a padded texture without changing the image geometry", () => {
-  assert.match(script, /const texturePadding = 8;/);
-  assert.match(script, /uniform vec2 u_textureInset;/);
-  assert.match(script, /uniform vec2 u_textureScale;/);
+test("the heat haze canvas is opaque and has no CSS frame", () => {
+  assert.match(script, /alpha: false,/);
   assert.match(script, /vec2 distortedUv = v_uv \+ offset;/);
-  assert.match(script, /vec2 textureUv = u_textureInset \+ distortedUv \* u_textureScale;/);
-  assert.match(script, /context\.drawImage\(imageCanvas, 0, 0, 1, imageHeight, 0, texturePadding, texturePadding, imageHeight\);/);
-  assert.match(script, /layer\.textureInset = \{/);
-  assert.match(script, /gl\.uniform2f\(textureInsetLocation, layer\.textureInset\.x, layer\.textureInset\.y\);/);
-  assert.doesNotMatch(script, /edgeFade/);
+  assert.match(script, /gl_FragColor = vec4\(texture2D\(u_image, distortedUv\)\.rgb, 1\.0\);/);
+  assert.match(styles, /\.fervidumWave\s*\{[^}]*border\s*:\s*0/s);
+  assert.match(styles, /\.fervidumWave\s*\{[^}]*outline\s*:\s*0/s);
+  assert.match(styles, /\.fervidumWave\s*\{[^}]*box-shadow\s*:\s*none/s);
 });
