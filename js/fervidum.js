@@ -842,7 +842,7 @@ const createWaveLayers = () => {
   }
 };
 
-const startFervidum = () => {
+const startFervidum = (includeSweep = true) => {
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
   sweepCanvas.classList.remove("is-active", "is-restoring", "is-fading");
@@ -858,7 +858,13 @@ const startFervidum = () => {
   document.body.offsetWidth;
 
   document.body.classList.add("fervidumActive");
-  startSweep();
+
+  if (includeSweep) {
+    startSweep();
+  } else {
+    cancelAnimationFrame(sweepFrame);
+    sweepContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  }
 };
 
 const resetFervidum = () => {
@@ -925,7 +931,8 @@ const initializeTouchEffects = () => {
 
     image?.addEventListener("click", () => {
       prepareEffects();
-      startFervidum();
+      // Keep touch feedback inside the image: a full-screen sweep reads as a pulse while pinching.
+      startFervidum(false);
       document.body.classList.add("fervidumWarpActive");
       startWave();
       effectActive = true;
