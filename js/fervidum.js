@@ -1,6 +1,7 @@
 const fervidumTiles = document.querySelectorAll(".fervidumTile");
 // Avoid creating hover-only canvases and image slices on touch devices, including landscape iPhones.
 const canUseHoverEffects = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+const canUseTouchEffects = window.matchMedia("(pointer: coarse)").matches;
 const duration = 5000;
 const sweepDuration = 4000;
 const restoreFadeDuration = 460;
@@ -561,40 +562,80 @@ const resetFervidum = () => {
   startGridRestore();
 };
 
-if (canUseHoverEffects) {
+const initializeHoverEffects = () => {
   createSweep();
   createWaveLayers();
+
+  fervidumTiles.forEach((tile) => {
+    let completeTimer;
+    let warpTimer;
+
+    tile.addEventListener("mouseenter", () => {
+      clearTimeout(completeTimer);
+      clearTimeout(warpTimer);
+
+      startFervidum();
+
+      warpTimer = setTimeout(() => {
+        document.body.classList.add("fervidumWarpActive");
+      }, warpDelay);
+
+      completeTimer = setTimeout(() => {
+        document.body.classList.add("fervidumComplete");
+      }, duration);
+    });
+
+    tile.addEventListener("mouseleave", () => {
+      clearTimeout(completeTimer);
+      clearTimeout(warpTimer);
+
+      resetFervidum();
+    });
+  });
+};
+
+const initializeTouchEffects = () => {
+  let effectsReady = false;
+  let effectActive = false;
+
+  const prepareEffects = () => {
+    if (effectsReady) {
+      return;
+    }
+
+    createSweep();
+    createWaveLayers();
+    effectsReady = true;
+  };
+
+  fervidumTiles.forEach((tile) => {
+    const image = tile.querySelector(".image");
+
+    image?.addEventListener("click", () => {
+      prepareEffects();
+      startFervidum();
+      effectActive = true;
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!effectActive || !(event.target instanceof Element)) {
+      return;
+    }
+
+    if (event.target.closest(".image, .fervidumWarpHost, a")) {
+      return;
+    }
+
+    resetFervidum();
+    effectActive = false;
+  });
+};
+
+if (canUseHoverEffects) {
+  initializeHoverEffects();
+} else if (canUseTouchEffects) {
+  initializeTouchEffects();
 }
 
 createConnections();
-
-fervidumTiles.forEach((tile) => {
-  if (!canUseHoverEffects) {
-    return;
-  }
-
-  let completeTimer;
-  let warpTimer;
-
-  tile.addEventListener("mouseenter", () => {
-    clearTimeout(completeTimer);
-    clearTimeout(warpTimer);
-
-    startFervidum();
-
-    warpTimer = setTimeout(() => {
-      document.body.classList.add("fervidumWarpActive");
-    }, warpDelay);
-
-    completeTimer = setTimeout(() => {
-      document.body.classList.add("fervidumComplete");
-    }, duration);
-  });
-
-  tile.addEventListener("mouseleave", () => {
-    clearTimeout(completeTimer);
-    clearTimeout(warpTimer);
-
-    resetFervidum();
-  });
-});
