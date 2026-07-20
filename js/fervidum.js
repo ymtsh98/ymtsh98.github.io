@@ -1,5 +1,9 @@
 const fervidumTiles = document.querySelectorAll(".fervidumTile");
 const canUseHoverEffects = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+// Diagnostic switches: draw the desktop canvas without advancing its heat-haze
+// shader, so its surface can be inspected separately from the distortion.
+const hoverCanvasEnabled = true;
+const hoverWaveEnabled = true;
 // Treat every non-hover layout as touch, including browsers that omit pointer capability details.
 const canUseTouchEffects = !canUseHoverEffects;
 const duration = 5000;
@@ -618,20 +622,12 @@ const uploadWaveTexture = (layer) => {
   const { gl, texture } = layer.renderer;
 
   try {
-    const source = document.createElement("canvas");
-    const context = source.getContext("2d", { alpha: false });
-
-    if (!context) {
-      return false;
-    }
-
-    source.width = layer.canvas.width;
-    source.height = layer.canvas.height;
-    context.drawImage(layer.textureImage, 0, 0, source.width, source.height);
-
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    // Upload the decoded image directly.  Routing it through a scaled 2D
+    // canvas introduces a second resampling and alpha-conversion boundary.
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, layer.textureImage);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
     return gl.getError() === gl.NO_ERROR;
@@ -753,7 +749,7 @@ const renderWaves = (now) => {
   waveFrame = requestAnimationFrame(renderWaves);
 };
 
-const startWave = () => {
+const startWave = (animate = true) => {
   const availableLayers = waveLayers.filter((layer) => (
     layer.available && layer.canvas.width > 0 && layer.canvas.height > 0
   ));
@@ -775,6 +771,11 @@ const startWave = () => {
   }
 
   waveLastRender = waveStartTime;
+
+  if (!animate) {
+    return true;
+  }
+
   waveFrame = requestAnimationFrame(renderWaves);
 
   return true;
@@ -925,7 +926,10 @@ const resetFervidum = () => {
 
 const initializeHoverEffects = () => {
   createSweep();
-  createWaveLayers();
+
+  if (hoverCanvasEnabled) {
+    createWaveLayers();
+  }
 
   fervidumTiles.forEach((tile) => {
     let completeTimer;
@@ -937,11 +941,13 @@ const initializeHoverEffects = () => {
 
       startFervidum();
 
-      warpTimer = setTimeout(() => {
-        if (startWave()) {
-          document.body.classList.add("fervidumWarpActive");
-        }
-      }, warpDelay);
+      if (hoverCanvasEnabled) {
+        warpTimer = setTimeout(() => {
+          if (startWave(hoverWaveEnabled)) {
+            document.body.classList.add("fervidumWarpActive");
+          }
+        }, warpDelay);
+      }
 
       completeTimer = setTimeout(() => {
         document.body.classList.add("fervidumComplete");
@@ -951,6 +957,11 @@ const initializeHoverEffects = () => {
     tile.addEventListener("mouseleave", () => {
       clearTimeout(completeTimer);
       clearTimeout(warpTimer);
+
+      if (hoverCanvasEnabled && !hoverWaveEnabled) {
+        document.body.classList.remove("fervidumWarpActive");
+        stopWave();
+      }
 
       resetFervidum();
     });

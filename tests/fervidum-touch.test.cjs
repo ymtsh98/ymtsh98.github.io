@@ -133,6 +133,7 @@ const createWebGlContext = () => ({
   RGBA: 0,
   UNSIGNED_BYTE: 0,
   UNPACK_FLIP_Y_WEBGL: 0,
+  UNPACK_PREMULTIPLY_ALPHA_WEBGL: 0,
   NO_ERROR: 0,
   createShader: () => ({}),
   shaderSource() {},
@@ -372,4 +373,23 @@ test("the heat haze canvas is opaque and has no CSS frame", () => {
   assert.match(styles, /\.fervidumWave\s*\{[^}]*border\s*:\s*0/s);
   assert.match(styles, /\.fervidumWave\s*\{[^}]*outline\s*:\s*0/s);
   assert.match(styles, /\.fervidumWave\s*\{[^}]*box-shadow\s*:\s*none/s);
+});
+
+test("desktop animates its canvas while its background animation remains active", () => {
+  assert.match(script, /const hoverCanvasEnabled = true;/);
+  assert.match(script, /const hoverWaveEnabled = true;/);
+  assert.match(script, /const startWave = \(animate = true\) => \{/);
+  assert.match(script, /if \(!animate\) \{\s*\n\s*return true;/s);
+  assert.match(script, /const initializeHoverEffects = \(\) => \{\s*createSweep\(\);\s*\n\s*if \(hoverCanvasEnabled\) \{\s*\n\s*createWaveLayers\(\);/s);
+  assert.match(script, /if \(startWave\(hoverWaveEnabled\)\) \{/);
+  assert.match(script, /if \(canUseHoverEffects\) \{\s*\n\s*initializeHoverEffects\(\);/s);
+});
+
+test("the WebGL texture uses the decoded image without a 2D canvas round trip", () => {
+  const upload = script.match(/const uploadWaveTexture = \(layer\) => \{([\s\S]*?)\r?\n\};\r?\n\r?\nconst resizeWaveLayer/);
+
+  assert.ok(upload);
+  assert.match(upload[1], /gl\.pixelStorei\(gl\.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false\);/);
+  assert.match(upload[1], /gl\.texImage2D\(gl\.TEXTURE_2D, 0, gl\.RGBA, gl\.RGBA, gl\.UNSIGNED_BYTE, layer\.textureImage\);/);
+  assert.doesNotMatch(upload[1], /document\.createElement\("canvas"\)/);
 });

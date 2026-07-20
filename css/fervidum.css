@@ -7,6 +7,7 @@ body {
   isolation: isolate;
   overflow-x: hidden;
   background-color: #f4f6f8;
+  margin: 0;
 }
 
 .page {
@@ -38,6 +39,11 @@ body {
 
 body.fervidumComplete {
   background-color: #f4f6f8;
+}
+
+canvas {
+  border: none;
+  outline: none;
 }
 
 .gallery {
