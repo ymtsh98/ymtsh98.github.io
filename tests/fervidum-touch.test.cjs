@@ -358,4 +358,8 @@ test("the active haze never hides its source image between WebGL frames", () => 
     /body\.fervidumWarpActive\s+\.fervidumSource\s*\{[^}]*opacity\s*:/s
   );
   assert.match(styles, /body\.fervidumWarpActive\s+\.fervidumWave\s*\{[^}]*opacity\s*:\s*1/s);
+  assert.match(
+    styles,
+    /@media\s*\(hover:\s*hover\)\s*and\s*\(pointer:\s*fine\)\s*\{[^}]*body\.fervidumWarpActive\s+\.fervidumTile::before\s*\{[^}]*opacity\s*:\s*0/s
+  );
 });
