@@ -6,6 +6,8 @@
   --canvas: #f4f6f8;
   --connector: #4e5f72;
   --grid-line: rgba(106, 137, 171, 0.14);
+  --grid-line-restore: rgba(78, 111, 149, 0.5);
+  --grid-size: 24px;
   --ink: #293445;
 }
 
@@ -23,7 +25,7 @@ body {
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-size: var(--grid-size) var(--grid-size);
   font-family: "Klee One", "Yu Kyokasho", "Yu Gothic UI", "Hiragino Sans", system-ui, sans-serif;
 }
 

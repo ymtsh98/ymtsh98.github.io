@@ -1,6 +1,7 @@
 const fervidumTiles = document.querySelectorAll(".fervidumTile");
 const duration = 5000;
 const sweepDuration = 4000;
+const restoreFadeDuration = 460;
 const warpDelay = 0;
 const hazeSliceWidth = 12;
 const minHazeSliceCount = 24;
@@ -21,6 +22,8 @@ let inkMaxArrival;
 let sweepFrame;
 let sweepStartTime = 0;
 let lastSweepRender = 0;
+let restoreFadeTimer;
+let cancelGridRewrite;
 let connectionCanvas;
 let connectionContext;
 let connectionFrame;
@@ -381,6 +384,9 @@ const renderSweep = (progress) => {
 
 const startSweep = () => {
   cancelAnimationFrame(sweepFrame);
+  cancelGridRewrite?.();
+  clearTimeout(restoreFadeTimer);
+  sweepCanvas.classList.remove("is-restoring", "is-fading");
 
   sweepStartTime = performance.now();
   resizeSweep();
@@ -409,6 +415,34 @@ const stopSweep = () => {
   cancelAnimationFrame(sweepFrame);
   sweepCanvas.classList.remove("is-active");
   sweepContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+};
+
+const finishFervidumExit = () => {
+  cancelGridRewrite?.();
+  cancelGridRewrite = undefined;
+  sweepCanvas.classList.remove("is-active", "is-restoring", "is-fading");
+  sweepContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  document.body.classList.remove(
+    "fervidumActive",
+    "fervidumComplete",
+    "fervidumWarpActive",
+    "fervidumExit",
+    "fervidumReset"
+  );
+};
+
+const startGridRestore = () => {
+  cancelAnimationFrame(sweepFrame);
+  cancelGridRewrite?.();
+  clearTimeout(restoreFadeTimer);
+  sweepCanvas.classList.remove("is-fading");
+  sweepCanvas.classList.add("is-restoring");
+  cancelGridRewrite = window.gridPaper.writeOnCanvas(sweepCanvas, sweepContext, {
+    onComplete: () => {
+      sweepCanvas.classList.add("is-fading");
+      restoreFadeTimer = window.setTimeout(finishFervidumExit, restoreFadeDuration);
+    }
+  });
 };
 
 const createWaveLayers = () => {
@@ -479,10 +513,15 @@ const createWaveLayers = () => {
 };
 
 const startFervidum = () => {
+  cancelGridRewrite?.();
+  clearTimeout(restoreFadeTimer);
+  sweepCanvas.classList.remove("is-active", "is-restoring", "is-fading");
+
   document.body.classList.remove(
     "fervidumActive",
     "fervidumComplete",
     "fervidumWarpActive",
+    "fervidumExit",
     "fervidumReset"
   );
 
@@ -493,20 +532,9 @@ const startFervidum = () => {
 };
 
 const resetFervidum = () => {
-  stopSweep();
-  document.body.classList.add("fervidumReset");
-
-  document.body.classList.remove(
-    "fervidumActive",
-    "fervidumComplete",
-    "fervidumWarpActive"
-  );
-
-  document.body.offsetWidth;
-
-  requestAnimationFrame(() => {
-    document.body.classList.remove("fervidumReset");
-  });
+  document.body.classList.remove("fervidumActive", "fervidumComplete", "fervidumReset");
+  document.body.classList.add("fervidumExit");
+  startGridRestore();
 };
 
 createSweep();

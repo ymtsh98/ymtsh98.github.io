@@ -72,6 +72,14 @@ body {
   opacity: 1;
 }
 
+.fervidumSweep.is-restoring {
+  transition: opacity 460ms ease-in-out;
+}
+
+.fervidumSweep.is-restoring.is-fading {
+  opacity: 0;
+}
+
 body.fervidumComplete {
   background-color: #f4f6f8;
 }
@@ -139,6 +147,16 @@ body.fervidumWarpActive .fervidumSource {
 
 body.fervidumWarpActive .fervidumWave {
   opacity: 1;
+}
+
+body.fervidumExit .fervidumSource {
+  opacity: 1;
+  transition: none;
+}
+
+body.fervidumExit .fervidumWave {
+  opacity: 0;
+  transition: opacity 240ms ease-out;
 }
 
 body.fervidumReset .fervidumSource {
