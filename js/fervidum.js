@@ -47,34 +47,15 @@ const getConnectionHosts = () => Array.from(
   document.querySelectorAll(".profileLinks a, .blogLinks, .tile")
 ).map((element) => {
   const rect = element.getBoundingClientRect();
-  const scrollX = window.scrollX;
-  const scrollY = window.scrollY;
 
   return {
-    rect: {
-      left: rect.left + scrollX,
-      top: rect.top + scrollY,
-      right: rect.right + scrollX,
-      bottom: rect.bottom + scrollY,
-      width: rect.width,
-      height: rect.height
-    },
+    rect,
     center: {
-      x: rect.left + scrollX + rect.width / 2,
-      y: rect.top + scrollY + rect.height / 2
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2
     }
   };
 }).filter(({ rect }) => rect.width > 0 && rect.height > 0);
-
-const getConnectionCanvasSize = () => {
-  const root = document.documentElement;
-  const body = document.body;
-
-  return {
-    width: Math.max(root.scrollWidth, root.clientWidth, body.scrollWidth, body.clientWidth),
-    height: Math.max(root.scrollHeight, root.clientHeight, body.scrollHeight, body.clientHeight)
-  };
-};
 
 const boxDistance = (first, second) => {
   const horizontalGap = Math.max(
@@ -141,12 +122,14 @@ const drawConnections = () => {
   connectionFrame = undefined;
 
   const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-  const { width, height } = getConnectionCanvasSize();
+  const { width, height } = connectionCanvas.getBoundingClientRect();
+
+  if (width === 0 || height === 0) {
+    return;
+  }
 
   connectionCanvas.width = Math.round(width * pixelRatio);
   connectionCanvas.height = Math.round(height * pixelRatio);
-  connectionCanvas.style.width = `${width}px`;
-  connectionCanvas.style.height = `${height}px`;
   connectionContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   connectionContext.clearRect(0, 0, width, height);
 
@@ -203,6 +186,9 @@ const createConnections = () => {
   });
 
   window.addEventListener("resize", scheduleConnections, { passive: true });
+  window.addEventListener("scroll", scheduleConnections, { passive: true });
+  window.visualViewport?.addEventListener("resize", scheduleConnections, { passive: true });
+  window.visualViewport?.addEventListener("scroll", scheduleConnections, { passive: true });
   document.addEventListener("load", scheduleConnections, true);
   scheduleConnections();
 };
