@@ -611,18 +611,30 @@ const createWaveRenderer = (canvas) => {
 };
 
 const uploadWaveTexture = (layer) => {
-  const source = document.createElement("canvas");
-  const context = source.getContext("2d", { alpha: false });
   const { gl, texture } = layer.renderer;
 
-  source.width = layer.canvas.width;
-  source.height = layer.canvas.height;
-  context.drawImage(layer.image, 0, 0, source.width, source.height);
+  try {
+    const source = document.createElement("canvas");
+    const context = source.getContext("2d", { alpha: false });
 
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    if (!context) {
+      return false;
+    }
+
+    source.width = layer.canvas.width;
+    source.height = layer.canvas.height;
+    context.drawImage(layer.image, 0, 0, source.width, source.height);
+
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+
+    return gl.getError() === gl.NO_ERROR;
+  } catch {
+    // file:// pages can reject a local image as a WebGL texture; keep the rest of the page running.
+    return false;
+  }
 };
 
 const resizeWaveLayer = (layer) => {
@@ -788,7 +800,9 @@ const createWaveLayers = () => {
       return;
     }
 
-    uploadWaveTexture(layer);
+    if (!uploadWaveTexture(layer)) {
+      return;
+    }
 
     const tile = image.parentElement;
     const host = document.createElement("div");
