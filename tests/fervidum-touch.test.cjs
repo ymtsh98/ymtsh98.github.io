@@ -176,6 +176,7 @@ const createHarness = ({ webgl }) => {
   let nextFrame = 1;
   const frames = new Map();
   const windowListeners = new Map();
+  const visualViewportListeners = new Map();
   const documentListeners = new Map();
   const body = new FakeElement("body");
   body.clientWidth = 390;
@@ -264,6 +265,15 @@ const createHarness = ({ webgl }) => {
       listeners.push(listener);
       windowListeners.set(type, listeners);
     },
+    visualViewport: {
+      width: 390,
+      height: 844,
+      addEventListener(type, listener) {
+        const listeners = visualViewportListeners.get(type) || [];
+        listeners.push(listener);
+        visualViewportListeners.set(type, listeners);
+      }
+    },
     setTimeout: () => 1,
     clearTimeout() {},
     gridPaper: {
@@ -302,8 +312,21 @@ const createHarness = ({ webgl }) => {
     frames.clear();
     callbacks.forEach((callback) => callback(now));
   };
+  const runVisualViewport = (type) => {
+    (visualViewportListeners.get(type) || []).forEach((listener) => listener());
+  };
 
-  return { blank, body, canvases, documentListeners, image, runFrames, runLoad, window };
+  return {
+    blank,
+    body,
+    canvases,
+    documentListeners,
+    image,
+    runFrames,
+    runLoad,
+    runVisualViewport,
+    window
+  };
 };
 
 test("touch keeps the background transition running when WebGL is unavailable", () => {
@@ -358,6 +381,22 @@ test("a touch pointer event is not restarted by its follow-up click and survives
   assert.ok(harness.body.classList.contains("fervidumWarpActive"));
 });
 
+test("the touch sweep repaints to cover a viewport that expands while scrolling", () => {
+  const harness = createHarness({ webgl: false });
+  harness.runLoad();
+  harness.image.emit("click");
+  harness.runFrames(5000);
+
+  const sweep = harness.canvases.find((canvas) => canvas.className === "fervidumSweep");
+  harness.window.innerHeight = 922;
+  harness.window.visualViewport.height = 922;
+  harness.runVisualViewport("scroll");
+  harness.runFrames(5016);
+
+  assert.equal(sweep.height, 922);
+  assert.ok(sweep.context2d.fills.at(-1) > 0);
+});
+
 test("the active haze displays one image surface at a time", () => {
   assert.match(
     styles,
@@ -374,6 +413,11 @@ test("the heat haze canvas is opaque and has no CSS frame", () => {
   assert.match(styles, /\.fervidumWave\s*\{[^}]*border\s*:\s*0/s);
   assert.match(styles, /\.fervidumWave\s*\{[^}]*outline\s*:\s*0/s);
   assert.match(styles, /\.fervidumWave\s*\{[^}]*box-shadow\s*:\s*none/s);
+});
+
+test("the sweep uses a dynamic viewport and leaves sizing to CSS", () => {
+  assert.match(styles, /\.fervidumSweep\s*\{[^}]*height\s*:\s*100dvh/s);
+  assert.doesNotMatch(script, /sweepCanvas\.style\.(?:width|height)\s*=/);
 });
 
 test("desktop animates its canvas while its background animation remains active", () => {

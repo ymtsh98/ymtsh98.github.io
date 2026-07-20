@@ -29,7 +29,9 @@ let inkWidth;
 let inkHeight;
 let inkMaxArrival;
 let sweepFrame;
+let sweepResizeFrame;
 let sweepStartTime = 0;
+let sweepProgress = 0;
 let lastSweepRender = 0;
 let restoreFadeTimer;
 let cancelGridRewrite;
@@ -53,11 +55,23 @@ const createSweep = () => {
   inkContext = inkCanvas.getContext("2d", { alpha: true });
 
   document.body.insertAdjacentElement("afterbegin", sweepCanvas);
+  window.addEventListener("resize", scheduleSweepResize, { passive: true });
+  window.visualViewport?.addEventListener("resize", scheduleSweepResize, { passive: true });
+  window.visualViewport?.addEventListener("scroll", scheduleSweepResize, { passive: true });
 };
 
 const easeInOut = (value) => value * value * (3 - 2 * value);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const getSweepViewportSize = () => {
+  const viewport = window.visualViewport;
+
+  return {
+    width: Math.ceil(viewport?.width || window.innerWidth),
+    height: Math.ceil(viewport?.height || window.innerHeight)
+  };
+};
 
 const getConnectionHosts = () => {
   const pageX = window.scrollX;
@@ -436,22 +450,26 @@ const createArrivalMap = () => {
 };
 
 const resizeSweep = () => {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const { width, height } = getSweepViewportSize();
   const pixelRatio = window.devicePixelRatio || 1;
+  const canvasWidth = Math.round(width * pixelRatio);
+  const canvasHeight = Math.round(height * pixelRatio);
 
-  sweepCanvas.width = Math.round(width * pixelRatio);
-  sweepCanvas.height = Math.round(height * pixelRatio);
-  sweepCanvas.style.width = `${width}px`;
-  sweepCanvas.style.height = `${height}px`;
+  if (sweepCanvas.width === canvasWidth && sweepCanvas.height === canvasHeight) {
+    return false;
+  }
+
+  sweepCanvas.width = canvasWidth;
+  sweepCanvas.height = canvasHeight;
   sweepContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   sweepContext.imageSmoothingEnabled = true;
   sweepContext.imageSmoothingQuality = "high";
+
+  return true;
 };
 
 const renderSweep = (progress) => {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const { width, height } = getSweepViewportSize();
   const phase = progress * inkMaxArrival * 1.05;
   const edgeSoftness = Math.max(1.2, inkMaxArrival * 0.028);
   const data = inkImageData.data;
@@ -490,13 +508,37 @@ const renderSweep = (progress) => {
   sweepContext.globalAlpha = 1;
 };
 
+const scheduleSweepResize = () => {
+  if (!sweepCanvas || sweepResizeFrame) {
+    return;
+  }
+
+  sweepResizeFrame = requestAnimationFrame(() => {
+    sweepResizeFrame = undefined;
+
+    if (
+      !sweepCanvas.classList.contains("is-active") ||
+      sweepCanvas.classList.contains("is-restoring")
+    ) {
+      return;
+    }
+
+    if (resizeSweep()) {
+      renderSweep(sweepProgress);
+    }
+  });
+};
+
 const startSweep = () => {
   cancelAnimationFrame(sweepFrame);
+  cancelAnimationFrame(sweepResizeFrame);
+  sweepResizeFrame = undefined;
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
   sweepCanvas.classList.remove("is-restoring", "is-fading");
 
   sweepStartTime = performance.now();
+  sweepProgress = 0;
   resizeSweep();
   createArrivalMap();
   lastSweepRender = 0;
@@ -504,6 +546,8 @@ const startSweep = () => {
 
   const draw = (now) => {
     const progress = Math.min((now - sweepStartTime) / sweepDuration, 1);
+
+    sweepProgress = progress;
 
     if (now - lastSweepRender >= 33 || progress === 1) {
       renderSweep(progress);
