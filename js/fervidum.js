@@ -1,6 +1,6 @@
 const fervidumTiles = document.querySelectorAll(".fervidumTile");
-// Temporary mobile safeguard: hover effects stay disabled below the mobile breakpoint.
-const isMobileViewport = window.matchMedia("(max-width: 760px)").matches;
+// Avoid creating hover-only canvases and image slices on touch devices, including landscape iPhones.
+const canUseHoverEffects = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 const duration = 5000;
 const sweepDuration = 4000;
 const restoreFadeDuration = 460;
@@ -561,7 +561,7 @@ const resetFervidum = () => {
   startGridRestore();
 };
 
-if (!isMobileViewport) {
+if (canUseHoverEffects) {
   createSweep();
   createWaveLayers();
 }
@@ -569,7 +569,7 @@ if (!isMobileViewport) {
 createConnections();
 
 fervidumTiles.forEach((tile) => {
-  if (isMobileViewport) {
+  if (!canUseHoverEffects) {
     return;
   }
 
