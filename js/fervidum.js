@@ -6,9 +6,8 @@ const duration = 5000;
 const sweepDuration = 4000;
 const restoreFadeDuration = 460;
 const warpDelay = 0;
-const hazeSliceWidth = 12;
-const minHazeSliceCount = 24;
-const maxHazeSliceCount = 52;
+const waveFrameInterval = 1000 / 30;
+const maxWavePixels = 1200000;
 const simulationCellSize = 8;
 const maxSimulationSide = 176;
 
@@ -29,6 +28,11 @@ let restoreFadeTimer;
 let cancelGridRewrite;
 let connectionLayer;
 let connectionFrame;
+let waveFrame;
+let waveStartTime = 0;
+let waveLastRender = 0;
+let waveResizeFrame;
+const waveLayers = [];
 const svgNamespace = "http://www.w3.org/2000/svg";
 
 const createSweep = () => {
@@ -449,6 +453,7 @@ const stopSweep = () => {
 
 const finishFervidumExit = () => {
   cancelAnimationFrame(sweepFrame);
+  stopWave();
   cancelGridRewrite?.();
   cancelGridRewrite = undefined;
   clearTimeout(restoreFadeTimer);
@@ -459,8 +464,7 @@ const finishFervidumExit = () => {
     "fervidumComplete",
     "fervidumWarpActive",
     "fervidumExit",
-    "fervidumReset",
-    "fervidumTouchActive"
+    "fervidumReset"
   );
 };
 
@@ -478,6 +482,267 @@ const startGridRestore = () => {
   });
 };
 
+const waveVertexShader = `
+  attribute vec2 a_position;
+  varying vec2 v_uv;
+
+  void main() {
+    v_uv = (a_position + 1.0) * 0.5;
+    gl_Position = vec4(a_position, 0.0, 1.0);
+  }
+`;
+
+const waveFragmentShader = `
+  precision mediump float;
+
+  varying vec2 v_uv;
+  uniform sampler2D u_image;
+  uniform vec2 u_resolution;
+  uniform float u_time;
+  uniform float u_strength;
+
+  float hash(vec2 point) {
+    return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453123);
+  }
+
+  float noise(vec2 point) {
+    vec2 cell = floor(point);
+    vec2 local = fract(point);
+    vec2 smooth = local * local * (3.0 - 2.0 * local);
+    float lower = mix(hash(cell), hash(cell + vec2(1.0, 0.0)), smooth.x);
+    float upper = mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), smooth.x);
+
+    return mix(lower, upper, smooth.y);
+  }
+
+  void main() {
+    float time = u_time * 0.18;
+    float broad = noise(vec2(v_uv.x * 2.8, v_uv.y * 7.5 - time));
+    float detail = noise(vec2(v_uv.x * 8.0 + 10.8, v_uv.y * 19.0 - time * 2.2));
+    float ripples = sin(v_uv.y * 52.0 - time * 15.0 + broad * 7.0);
+    float horizontal = (broad - 0.5) * 0.95 + (detail - 0.5) * 0.45 + ripples * 0.32;
+    float vertical = noise(vec2(v_uv.x * 5.5 - 3.2, v_uv.y * 12.0 - time * 1.35)) - 0.5;
+    vec2 offset = vec2(
+      horizontal * u_strength / u_resolution.x,
+      vertical * u_strength * 0.33 / u_resolution.y
+    );
+    vec2 distortedUv = clamp(v_uv + offset, vec2(0.001), vec2(0.999));
+
+    gl_FragColor = texture2D(u_image, distortedUv);
+  }
+`;
+
+const compileWaveShader = (gl, type, source) => {
+  const shader = gl.createShader(type);
+
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    return shader;
+  }
+
+  gl.deleteShader(shader);
+  return undefined;
+};
+
+const createWaveProgram = (gl) => {
+  const vertexShader = compileWaveShader(gl, gl.VERTEX_SHADER, waveVertexShader);
+  const fragmentShader = compileWaveShader(gl, gl.FRAGMENT_SHADER, waveFragmentShader);
+
+  if (!vertexShader || !fragmentShader) {
+    return undefined;
+  }
+
+  const program = gl.createProgram();
+
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+
+  if (gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    return program;
+  }
+
+  gl.deleteProgram(program);
+  return undefined;
+};
+
+const createWaveRenderer = (canvas) => {
+  const gl = canvas.getContext("webgl", {
+    alpha: true,
+    antialias: false,
+    premultipliedAlpha: false,
+    powerPreference: "low-power"
+  });
+  const program = gl && createWaveProgram(gl);
+
+  if (!gl || !program) {
+    return undefined;
+  }
+
+  const positionBuffer = gl.createBuffer();
+  const texture = gl.createTexture();
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1,
+    1, -1,
+    -1, 1,
+    -1, 1,
+    1, -1,
+    1, 1
+  ]), gl.STATIC_DRAW);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  return {
+    gl,
+    program,
+    positionBuffer,
+    texture,
+    positionLocation: gl.getAttribLocation(program, "a_position"),
+    imageLocation: gl.getUniformLocation(program, "u_image"),
+    resolutionLocation: gl.getUniformLocation(program, "u_resolution"),
+    timeLocation: gl.getUniformLocation(program, "u_time"),
+    strengthLocation: gl.getUniformLocation(program, "u_strength")
+  };
+};
+
+const uploadWaveTexture = (layer) => {
+  const source = document.createElement("canvas");
+  const context = source.getContext("2d", { alpha: false });
+  const { gl, texture } = layer.renderer;
+
+  source.width = layer.canvas.width;
+  source.height = layer.canvas.height;
+  context.drawImage(layer.image, 0, 0, source.width, source.height);
+
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+};
+
+const resizeWaveLayer = (layer) => {
+  const rect = layer.image.getBoundingClientRect();
+  const width = Math.round(rect.width);
+  const height = Math.round(rect.height);
+
+  if (width < 1 || height < 1) {
+    return;
+  }
+
+  const deviceScale = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelScale = Math.min(deviceScale, Math.sqrt(maxWavePixels / (width * height)));
+  const canvasWidth = Math.max(1, Math.round(width * pixelScale));
+  const canvasHeight = Math.max(1, Math.round(height * pixelScale));
+
+  const resized = layer.canvas.width !== canvasWidth || layer.canvas.height !== canvasHeight;
+
+  if (resized) {
+    layer.canvas.width = canvasWidth;
+    layer.canvas.height = canvasHeight;
+  }
+
+  layer.width = width;
+  layer.pixelScale = canvasWidth / width;
+
+  if (layer.renderer) {
+    layer.renderer.gl.viewport(0, 0, canvasWidth, canvasHeight);
+
+    if (resized) {
+      uploadWaveTexture(layer);
+    }
+  }
+};
+
+const resizeWaveLayers = () => {
+  waveResizeFrame = undefined;
+  waveLayers.forEach(resizeWaveLayer);
+};
+
+const scheduleWaveResize = () => {
+  if (!waveResizeFrame) {
+    waveResizeFrame = requestAnimationFrame(resizeWaveLayers);
+  }
+};
+
+const renderWaveLayer = (layer, now) => {
+  if (!layer.available || layer.canvas.width === 0 || layer.canvas.height === 0) {
+    return;
+  }
+
+  const {
+    gl,
+    program,
+    positionBuffer,
+    texture,
+    positionLocation,
+    imageLocation,
+    resolutionLocation,
+    timeLocation,
+    strengthLocation
+  } = layer.renderer;
+
+  if (gl.isContextLost()) {
+    layer.available = false;
+    return;
+  }
+
+  gl.useProgram(program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.enableVertexAttribArray(positionLocation);
+  gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.uniform1i(imageLocation, 0);
+  gl.uniform2f(resolutionLocation, layer.canvas.width, layer.canvas.height);
+  gl.uniform1f(timeLocation, (now - waveStartTime) / 1000);
+  gl.uniform1f(strengthLocation, 3.4 * layer.pixelScale);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+};
+
+const renderWaves = (now) => {
+  if (!document.body.classList.contains("fervidumWarpActive")) {
+    waveFrame = undefined;
+    return;
+  }
+
+  if (now - waveLastRender >= waveFrameInterval) {
+    waveLayers.forEach((layer) => renderWaveLayer(layer, now));
+    waveLastRender = now;
+  }
+
+  waveFrame = requestAnimationFrame(renderWaves);
+};
+
+const startWave = () => {
+  if (waveLayers.length === 0) {
+    return;
+  }
+
+  cancelAnimationFrame(waveFrame);
+  waveStartTime = performance.now();
+  waveLastRender = 0;
+  renderWaves(waveStartTime);
+};
+
+const stopWave = () => {
+  cancelAnimationFrame(waveFrame);
+  waveFrame = undefined;
+  waveLayers.forEach(({ canvas, renderer }) => {
+    renderer.gl.clearColor(0, 0, 0, 0);
+    renderer.gl.clear(renderer.gl.COLOR_BUFFER_BIT);
+    renderer.gl.viewport(0, 0, canvas.width, canvas.height);
+  });
+};
+
 const createWaveLayers = () => {
   const images = document.querySelectorAll(".gallery img");
 
@@ -490,62 +755,59 @@ const createWaveLayers = () => {
       return;
     }
 
+    if (image.closest(".fervidumWarpHost")) {
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    const layer = {
+      available: true,
+      canvas,
+      image,
+      imageIndex,
+      pixelScale: 1,
+      renderer: undefined,
+      width: 0
+    };
+
+    resizeWaveLayer(layer);
+    layer.renderer = createWaveRenderer(canvas);
+
+    if (!layer.renderer) {
+      return;
+    }
+
+    uploadWaveTexture(layer);
+
     const tile = image.parentElement;
     const host = document.createElement("div");
-    const wave = document.createElement("div");
-    const duration = 6200 + (imageIndex % 4) * 700;
-    const sliceCount = clamp(
-      Math.round(image.getBoundingClientRect().width / hazeSliceWidth),
-      minHazeSliceCount,
-      maxHazeSliceCount
-    );
-    const waveIntensity = image.naturalWidth > image.naturalHeight
-      ? Math.max(0.45, image.naturalHeight / image.naturalWidth)
-      : 1;
 
     host.className = "fervidumWarpHost";
     tile.insertBefore(host, image);
     host.appendChild(image);
     image.classList.add("fervidumSource");
 
-    wave.className = "fervidumWave";
-    wave.setAttribute("aria-hidden", "true");
-    wave.style.setProperty("--fervidumHazeDuration", `${duration}ms`);
-    wave.style.setProperty("--fervidumWaveStartDelay", `${imageIndex * 220}ms`);
+    canvas.className = "fervidumWave";
+    canvas.setAttribute("aria-hidden", "true");
+    host.appendChild(canvas);
 
-    for (let index = 0; index < sliceCount; index += 1) {
-      const slice = document.createElement("span");
-      const sliceImage = image.cloneNode(false);
-      const left = (index / sliceCount) * 100;
-      const right = 100 - ((index + 1) / sliceCount) * 100;
-      const direction = (index + imageIndex) % 2 === 0 ? 1 : -1;
-      const baseAmplitude = 1 + ((index * 3 + imageIndex) % 3);
-      const amplitude = baseAmplitude * waveIntensity;
-      const settleAmplitude = Math.max(1, baseAmplitude - 1) * waveIntensity;
+    canvas.addEventListener("webglcontextlost", (event) => {
+      event.preventDefault();
+      layer.available = false;
+      document.body.classList.remove("fervidumWarpActive");
+      stopWave();
+    });
 
-      slice.className = "fervidumWaveSlice";
-      slice.setAttribute("aria-hidden", "true");
-      slice.style.setProperty("--fervidumSliceLeft", `${left}%`);
-      slice.style.setProperty("--fervidumSliceRight", `${right}%`);
-      slice.style.setProperty("--fervidumSliceDelay", `${80 + ((index * 83 + imageIndex * 137) % 480)}ms`);
-      slice.style.setProperty("--fervidumHazeDriftA", `${direction * amplitude}px`);
-      slice.style.setProperty("--fervidumHazeDriftB", `${direction * -amplitude}px`);
-      slice.style.setProperty("--fervidumHazeDriftC", `${direction * settleAmplitude}px`);
-
-      sliceImage.className = "fervidumHazeImage";
-      sliceImage.alt = "";
-      sliceImage.loading = "eager";
-      sliceImage.removeAttribute("id");
-      sliceImage.setAttribute("aria-hidden", "true");
-
-      slice.appendChild(sliceImage);
-      wave.appendChild(slice);
-    }
-
-    host.appendChild(wave);
+    waveLayers.push(layer);
   };
 
   images.forEach(createWaveLayer);
+
+  window.addEventListener("orientationchange", scheduleWaveResize, { passive: true });
+
+  if (canUseHoverEffects) {
+    window.addEventListener("resize", scheduleWaveResize, { passive: true });
+  }
 };
 
 const startFervidum = () => {
@@ -568,11 +830,11 @@ const startFervidum = () => {
 };
 
 const resetFervidum = () => {
+  stopWave();
   document.body.classList.remove(
     "fervidumActive",
     "fervidumComplete",
-    "fervidumReset",
-    "fervidumTouchActive"
+    "fervidumReset"
   );
   document.body.classList.add("fervidumExit");
   startGridRestore();
@@ -594,6 +856,7 @@ const initializeHoverEffects = () => {
 
       warpTimer = setTimeout(() => {
         document.body.classList.add("fervidumWarpActive");
+        startWave();
       }, warpDelay);
 
       completeTimer = setTimeout(() => {
@@ -619,8 +882,9 @@ const initializeTouchEffects = () => {
       return;
     }
 
-    // Full-image slices are desktop-only; dozens of animated image layers crash iOS during pinch-zoom.
+    // One capped-resolution canvas re-renders the source image; no cloned images or extra image layers.
     createSweep();
+    createWaveLayers();
     effectsReady = true;
   };
 
@@ -629,8 +893,9 @@ const initializeTouchEffects = () => {
 
     image?.addEventListener("click", () => {
       prepareEffects();
-      document.body.classList.add("fervidumTouchActive");
       startFervidum();
+      document.body.classList.add("fervidumWarpActive");
+      startWave();
       effectActive = true;
     });
   });
