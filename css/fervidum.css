@@ -77,12 +77,6 @@ body.fervidumWarpActive .fervidumWave {
   opacity: 1;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  body.fervidumWarpActive .fervidumTile::before {
-    opacity: 0;
-  }
-}
-
 body.fervidumExit .fervidumWave {
   opacity: 0;
   transition: opacity 260ms ease-out;

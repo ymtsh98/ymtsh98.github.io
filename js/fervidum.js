@@ -522,7 +522,10 @@ const waveFragmentShader = `
       horizontal * u_strength * lowerFalloff / u_resolution.x,
       vertical * u_strength * lowerFalloff * 0.22 / u_resolution.y
     );
-    vec2 distortedUv = clamp(v_uv + offset, vec2(0.001), vec2(0.999));
+    // Fade distortion out at the image edge instead of stretching edge texels into a frame.
+    float edgeDistance = min(min(v_uv.x, v_uv.y), min(1.0 - v_uv.x, 1.0 - v_uv.y));
+    float edgeFade = smoothstep(0.0, 0.028, edgeDistance);
+    vec2 distortedUv = v_uv + offset * edgeFade;
 
     gl_FragColor = texture2D(u_image, distortedUv);
   }
