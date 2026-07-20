@@ -1,0 +1,28 @@
+@keyframes galleryColorFade {
+  from {
+    opacity: 0.74;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+.galleryColorFade {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  opacity: 0;
+  pointer-events: none;
+  background-color: #fd9e44;
+}
+
+.galleryColorFade.is-active {
+  animation: galleryColorFade 520ms ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .galleryColorFade.is-active {
+    animation-duration: 1ms;
+  }
+}
