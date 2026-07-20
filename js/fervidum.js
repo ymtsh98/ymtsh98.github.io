@@ -27,6 +27,8 @@ let cancelGridRewrite;
 let connectionCanvas;
 let connectionContext;
 let connectionFrame;
+let connectionBitmapWidth = 0;
+let connectionBitmapHeight = 0;
 
 const createSweep = () => {
   sweepCanvas = document.createElement("canvas");
@@ -128,8 +130,16 @@ const drawConnections = () => {
     return;
   }
 
-  connectionCanvas.width = Math.round(width * pixelRatio);
-  connectionCanvas.height = Math.round(height * pixelRatio);
+  const bitmapWidth = Math.round(width * pixelRatio);
+  const bitmapHeight = Math.round(height * pixelRatio);
+
+  if (bitmapWidth !== connectionBitmapWidth || bitmapHeight !== connectionBitmapHeight) {
+    connectionCanvas.width = bitmapWidth;
+    connectionCanvas.height = bitmapHeight;
+    connectionBitmapWidth = bitmapWidth;
+    connectionBitmapHeight = bitmapHeight;
+  }
+
   connectionContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   connectionContext.clearRect(0, 0, width, height);
 
@@ -163,6 +173,10 @@ const scheduleConnections = () => {
 };
 
 const createConnections = () => {
+  if (window.matchMedia("(pointer: coarse)").matches) {
+    return;
+  }
+
   connectionCanvas = document.createElement("canvas");
   connectionCanvas.className = "boxConnections";
   connectionCanvas.setAttribute("aria-hidden", "true");
@@ -545,33 +559,37 @@ const resetFervidum = () => {
   startGridRestore();
 };
 
-createSweep();
-createWaveLayers();
-createConnections();
+const canUseHoverEffects = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
-fervidumTiles.forEach((tile) => {
-  let completeTimer;
-  let warpTimer;
+if (canUseHoverEffects) {
+  createSweep();
+  createWaveLayers();
+  createConnections();
 
-  tile.addEventListener("mouseenter", () => {
-    clearTimeout(completeTimer);
-    clearTimeout(warpTimer);
+  fervidumTiles.forEach((tile) => {
+    let completeTimer;
+    let warpTimer;
 
-    startFervidum();
+    tile.addEventListener("mouseenter", () => {
+      clearTimeout(completeTimer);
+      clearTimeout(warpTimer);
 
-    warpTimer = setTimeout(() => {
-      document.body.classList.add("fervidumWarpActive");
-    }, warpDelay);
+      startFervidum();
 
-    completeTimer = setTimeout(() => {
-      document.body.classList.add("fervidumComplete");
-    }, duration);
+      warpTimer = setTimeout(() => {
+        document.body.classList.add("fervidumWarpActive");
+      }, warpDelay);
+
+      completeTimer = setTimeout(() => {
+        document.body.classList.add("fervidumComplete");
+      }, duration);
+    });
+
+    tile.addEventListener("mouseleave", () => {
+      clearTimeout(completeTimer);
+      clearTimeout(warpTimer);
+
+      resetFervidum();
+    });
   });
-
-  tile.addEventListener("mouseleave", () => {
-    clearTimeout(completeTimer);
-    clearTimeout(warpTimer);
-
-    resetFervidum();
-  });
-});
+}
