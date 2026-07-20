@@ -459,7 +459,8 @@ const finishFervidumExit = () => {
     "fervidumComplete",
     "fervidumWarpActive",
     "fervidumExit",
-    "fervidumReset"
+    "fervidumReset",
+    "fervidumTouchActive"
   );
 };
 
@@ -567,7 +568,12 @@ const startFervidum = () => {
 };
 
 const resetFervidum = () => {
-  document.body.classList.remove("fervidumActive", "fervidumComplete", "fervidumReset");
+  document.body.classList.remove(
+    "fervidumActive",
+    "fervidumComplete",
+    "fervidumReset",
+    "fervidumTouchActive"
+  );
   document.body.classList.add("fervidumExit");
   startGridRestore();
 };
@@ -622,8 +628,8 @@ const initializeTouchEffects = () => {
       return;
     }
 
+    // Full-image slices are desktop-only; dozens of animated image layers crash iOS during pinch-zoom.
     createSweep();
-    createWaveLayers();
     effectsReady = true;
   };
 
@@ -632,6 +638,7 @@ const initializeTouchEffects = () => {
 
     image?.addEventListener("click", () => {
       prepareEffects();
+      document.body.classList.add("fervidumTouchActive");
       startFervidum();
       effectActive = true;
     });

@@ -42,6 +42,19 @@
   }
 }
 
+@keyframes fervidumTouchPulse {
+  0%,
+  100% {
+    filter: saturate(1) contrast(1);
+    transform: scale3d(1, 1, 1);
+  }
+
+  50% {
+    filter: saturate(1.18) contrast(1.06) sepia(0.08);
+    transform: scale3d(1.012, 1.012, 1);
+  }
+}
+
 :root {
   --fervidumColor: #fd9e44ff;
 }
@@ -103,6 +116,12 @@ body.fervidumComplete {
   transform: translate3d(0, 0, 0);
   transition: opacity 0s;
   will-change: opacity, transform;
+}
+
+body.fervidumTouchActive .fervidum {
+  animation: fervidumTouchPulse 1600ms ease-in-out infinite;
+  transform-origin: center;
+  will-change: filter, transform;
 }
 
 .fervidumWave {
