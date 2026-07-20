@@ -946,7 +946,8 @@ const initializeTouchEffects = () => {
 
   const activateTouchEffect = () => {
     prepareEffects();
-    startFervidum(false);
+    // A tap keeps the one-shot background-color transition as well as the image-local haze.
+    startFervidum();
 
     if (!startWave()) {
       // Never hide the source image when WebGL is unavailable.
