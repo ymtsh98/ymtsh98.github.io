@@ -16,6 +16,7 @@ const waveFadeDuration = 260;
 const maxWavePixels = 1200000;
 const simulationCellSize = 8;
 const maxSimulationSide = 176;
+const connectionEdgeOffsetMax = 0.38;
 
 let sweepCanvas;
 let sweepContext;
@@ -110,18 +111,65 @@ const boxDistance = (first, second) => {
   return Math.hypot(horizontalGap, verticalGap);
 };
 
-const getBorderPoint = ({ rect, center }, target) => {
-  const deltaX = target.x - center.x;
-  const deltaY = target.y - center.y;
-  const scale = 1 / Math.max(
-    Math.abs(deltaX) / (rect.width / 2),
-    Math.abs(deltaY) / (rect.height / 2)
+const stableRandom = (seed) => {
+  const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+  return value - Math.floor(value);
+};
+
+const getConnectionEdgeOffset = (from, to) => {
+  const seed = (from + 1) * 31 + (to + 1) * 17;
+
+  return (stableRandom(seed) * 2 - 1) * connectionEdgeOffsetMax;
+};
+
+const getConnectionAxis = (first, second) => {
+  const horizontalGap = Math.max(
+    0,
+    first.rect.left - second.rect.right,
+    second.rect.left - first.rect.right
+  );
+  const verticalGap = Math.max(
+    0,
+    first.rect.top - second.rect.bottom,
+    second.rect.top - first.rect.bottom
   );
 
+  if (horizontalGap === verticalGap) {
+    return Math.abs(first.center.x - second.center.x) >= Math.abs(first.center.y - second.center.y)
+      ? "horizontal"
+      : "vertical";
+  }
+
+  return horizontalGap > verticalGap ? "horizontal" : "vertical";
+};
+
+const getBorderPoint = ({ rect, center }, target, axis, edgeOffset = 0) => {
+  const inset = Math.min(10, Math.min(rect.width, rect.height) / 4);
+  const direction = Math.sign(
+    axis === "horizontal" ? target.x - center.x : target.y - center.y
+  ) || 1;
+
+  if (axis === "horizontal") {
+    return {
+      x: center.x + direction * rect.width / 2,
+      y: clamp(center.y + edgeOffset * rect.height, rect.top + inset, rect.bottom - inset)
+    };
+  }
+
   return {
-    x: center.x + deltaX * scale,
-    y: center.y + deltaY * scale
+    x: clamp(center.x + edgeOffset * rect.width, rect.left + inset, rect.right - inset),
+    y: center.y + direction * rect.height / 2
   };
+};
+
+const getTwoBendPath = (start, end, axis) => {
+  if (axis === "horizontal") {
+    const bendX = (start.x + end.x) / 2;
+    return `M ${start.x} ${start.y} L ${bendX} ${start.y} L ${bendX} ${end.y} L ${end.x} ${end.y}`;
+  }
+
+  const bendY = (start.y + end.y) / 2;
+  return `M ${start.x} ${start.y} L ${start.x} ${bendY} L ${end.x} ${bendY} L ${end.x} ${end.y}`;
 };
 
 const getConnectionEdges = (hosts) => {
@@ -173,11 +221,22 @@ const drawConnections = () => {
   connectionLayer.style.height = `${height}px`;
 
   getConnectionEdges(hosts).forEach(({ from, to }) => {
-    const start = getBorderPoint(hosts[from], hosts[to].center);
-    const end = getBorderPoint(hosts[to], hosts[from].center);
+    const axis = getConnectionAxis(hosts[from], hosts[to]);
+    const start = getBorderPoint(
+      hosts[from],
+      hosts[to].center,
+      axis,
+      getConnectionEdgeOffset(from, to)
+    );
+    const end = getBorderPoint(
+      hosts[to],
+      hosts[from].center,
+      axis,
+      getConnectionEdgeOffset(to, from)
+    );
     const path = document.createElementNS(svgNamespace, "path");
 
-    path.setAttribute("d", `M ${start.x} ${start.y} L ${end.x} ${end.y}`);
+    path.setAttribute("d", getTwoBendPath(start, end, axis));
     path.setAttribute("fill", "none");
     path.setAttribute("stroke", ink);
     path.setAttribute("stroke-linecap", "round");
