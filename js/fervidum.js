@@ -377,8 +377,15 @@ const createArrivalMap = () => {
 };
 
 const resizeSweep = () => {
-  sweepCanvas.width = window.innerWidth;
-  sweepCanvas.height = window.innerHeight;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const pixelRatio = window.devicePixelRatio || 1;
+
+  sweepCanvas.width = Math.round(width * pixelRatio);
+  sweepCanvas.height = Math.round(height * pixelRatio);
+  sweepCanvas.style.width = `${width}px`;
+  sweepCanvas.style.height = `${height}px`;
+  sweepContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   sweepContext.imageSmoothingEnabled = true;
   sweepContext.imageSmoothingQuality = "high";
 };
@@ -483,6 +490,10 @@ const startGridRestore = () => {
   sweepCanvas.classList.remove("is-fading");
   sweepCanvas.classList.add("is-restoring");
   cancelGridRewrite = window.gridPaper.writeOnCanvas(sweepCanvas, sweepContext, {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
     onComplete: () => {
       sweepCanvas.classList.add("is-fading");
       restoreFadeTimer = window.setTimeout(finishFervidumExit, restoreFadeDuration);
@@ -518,11 +529,11 @@ const waveFragmentShader = `
 
   void main() {
     // A time-scrolled distortion field gives the image a continuous heat-haze flow.
-    float time = u_time * 0.42;
-    float column = sin(v_uv.x * 11.0 + time * 2.0) * 0.08;
-    float horizontal = heatNoise(v_uv.y * 8.8 - time + column) - 0.5;
-    float vertical = heatNoise(v_uv.y * 13.2 - time * 1.38 + column * 0.6) - 0.5;
-    float lowerFalloff = 1.0 - smoothstep(0.0, 1.0, v_uv.y);
+    float time = u_time * 0.18;
+    float column = sin(v_uv.x * 11.0 + time * 2.0) * 0.38;
+    float horizontal = heatNoise(v_uv.y * 16.0 - time + column) - 0.5;
+    float vertical = heatNoise(v_uv.y * 16.0 - time * 1.0 + column * 0.6) - 0.5;
+    float lowerFalloff = 0.5 + 0.5 * smoothstep(0.0, 1.0, v_uv.y);
     vec2 offset = vec2(
       horizontal * u_strength * lowerFalloff / u_resolution.x,
       vertical * u_strength * lowerFalloff * 0.22 / u_resolution.y

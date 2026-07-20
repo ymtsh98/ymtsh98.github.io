@@ -1,6 +1,6 @@
 const gridPaper = (() => {
   const defaultDuration = 600;
-  const defaultGridSize = 24;
+  const defaultGridSize = 32;
   const defaultLineColor = "rgba(78, 111, 149, 0.5)";
 
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -11,7 +11,17 @@ const gridPaper = (() => {
     getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
   );
 
-  const createStrokes = (canvas, gridSize, duration) => {
+  const getCssNumber = (name, fallback) => {
+    const value = Number.parseFloat(getCssVariable(name, `${fallback}`));
+
+    return Number.isFinite(value) ? value : fallback;
+  };
+
+  const getFirstGridLine = (scrollOffset, gridOffset, gridSize) => (
+    gridOffset + Math.floor((scrollOffset - gridOffset) / gridSize) * gridSize - scrollOffset
+  );
+
+  const createStrokes = ({ width, height, gridSize, offsetX, offsetY, scrollX, scrollY, duration }) => {
     const strokes = [];
     const createStroke = (axis, position, length) => {
       const strokeDuration = 220 + Math.random() * 400;
@@ -29,12 +39,12 @@ const gridPaper = (() => {
       });
     };
 
-    for (let x = 0; x <= canvas.width; x += gridSize) {
-      createStroke("vertical", x + 0.5, canvas.height);
+    for (let x = getFirstGridLine(scrollX, offsetX, gridSize); x <= width; x += gridSize) {
+      createStroke("vertical", x + 0.5, height);
     }
 
-    for (let y = 0; y <= canvas.height; y += gridSize) {
-      createStroke("horizontal", y + 0.5, canvas.width);
+    for (let y = getFirstGridLine(scrollY, offsetY, gridSize); y <= height; y += gridSize) {
+      createStroke("horizontal", y + 0.5, width);
     }
 
     return strokes;
@@ -42,10 +52,24 @@ const gridPaper = (() => {
 
   const writeOnCanvas = (canvas, context, options = {}) => {
     const duration = options.duration || defaultDuration;
-    const gridSize = Number.parseFloat(getCssVariable("--grid-size", `${defaultGridSize}`))
-      || defaultGridSize;
+    const gridSize = Math.max(getCssNumber("--grid-size", defaultGridSize), 1);
     const lineColor = getCssVariable("--grid-line-restore", defaultLineColor);
-    const strokes = createStrokes(canvas, gridSize, duration);
+    const width = options.width || canvas.clientWidth || canvas.width;
+    const height = options.height || canvas.clientHeight || canvas.height;
+    const offsetX = getCssNumber("--grid-offset-x", 0);
+    const offsetY = getCssNumber("--grid-offset-y", 0);
+    const scrollX = options.scrollX ?? window.scrollX ?? 0;
+    const scrollY = options.scrollY ?? window.scrollY ?? 0;
+    const strokes = createStrokes({
+      width,
+      height,
+      gridSize,
+      offsetX,
+      offsetY,
+      scrollX,
+      scrollY,
+      duration
+    });
     const complete = options.onComplete || (() => {});
     const startTime = performance.now();
     let frame;

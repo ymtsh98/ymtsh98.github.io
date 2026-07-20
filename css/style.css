@@ -8,6 +8,8 @@
   --grid-line: rgba(106, 137, 171, 0.14);
   --grid-line-restore: rgba(78, 111, 149, 0.5);
   --grid-size: 32px;
+  --grid-offset-x: 0px;
+  --grid-offset-y: 0px;
   --ink: #293445;
 }
 
@@ -26,6 +28,7 @@ body {
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: var(--grid-size) var(--grid-size);
+  background-position: var(--grid-offset-x) var(--grid-offset-y);
   font-family: "Klee One", "Yu Kyokasho", "Yu Gothic UI", "Hiragino Sans", system-ui, sans-serif;
 }
 
@@ -250,3 +253,4 @@ a {
     --gallery-gap: 32px;
   }
 }
+

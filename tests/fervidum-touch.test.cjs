@@ -100,6 +100,7 @@ const createContext2d = () => {
     fills,
     globalAlpha: 1,
     filter: "none",
+    setTransform() {},
     clearRect() {},
     createImageData(width, height) {
       return { data: new Uint8ClampedArray(width * height * 4) };
