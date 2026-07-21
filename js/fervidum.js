@@ -64,21 +64,17 @@ const easeInOut = (value) => value * value * (3 - 2 * value);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-const getSweepViewportSize = () => {
-  const viewport = window.visualViewport;
-
-  return {
-    width: Math.ceil(viewport?.width || window.innerWidth),
-    height: Math.ceil(viewport?.height || window.innerHeight)
-  };
-};
+const getSweepViewportSize = () => ({
+  width: window.innerWidth,
+  height: window.innerHeight
+});
 
 const getConnectionHosts = () => {
   const pageX = window.scrollX;
   const pageY = window.scrollY;
 
   return Array.from(
-    document.querySelectorAll(".profileLinks a, .blogLinks, .tile")
+    document.querySelectorAll(".profileLinks a, .blogLinks, .tile, .siteFooter")
   ).map((element) => {
     const rect = element.getBoundingClientRect();
     const connectionRect = {
@@ -284,7 +280,7 @@ const createConnections = () => {
 
   const resizeObserver = new ResizeObserver(scheduleConnections);
   const observeConnectionHosts = () => {
-    document.querySelectorAll(".page, .profileLinks, .gallery, .profileLinks a, .blogLinks, .tile")
+    document.querySelectorAll(".page, .profileLinks, .gallery, .profileLinks a, .blogLinks, .tile, .siteFooter")
       .forEach((element) => resizeObserver.observe(element));
   };
 
@@ -587,16 +583,18 @@ const finishFervidumExit = () => {
 };
 
 const startGridRestore = () => {
+  const { width, height } = getSweepViewportSize();
+
   cancelAnimationFrame(sweepFrame);
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
   sweepCanvas.classList.remove("is-fading");
   sweepCanvas.classList.add("is-restoring");
   cancelGridRewrite = window.gridPaper.writeOnCanvas(sweepCanvas, sweepContext, {
-    width: window.innerWidth,
-    height: window.innerHeight,
-    scrollX: window.scrollX,
-    scrollY: window.scrollY,
+    width,
+    height,
+    scrollX: 0,
+    scrollY: 0,
     onComplete: () => {
       sweepCanvas.classList.add("is-fading");
       restoreFadeTimer = window.setTimeout(finishFervidumExit, restoreFadeDuration);

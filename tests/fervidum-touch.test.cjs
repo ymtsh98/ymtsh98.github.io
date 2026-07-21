@@ -6,6 +6,7 @@ const vm = require("node:vm");
 
 const script = fs.readFileSync(path.join(__dirname, "..", "js", "fervidum.js"), "utf8");
 const styles = fs.readFileSync(path.join(__dirname, "..", "css", "fervidum.css"), "utf8");
+const pageStyles = fs.readFileSync(path.join(__dirname, "..", "css", "style.css"), "utf8");
 
 class FakeClassList {
   #values = new Set();
@@ -178,6 +179,7 @@ const createHarness = ({ webgl }) => {
   const windowListeners = new Map();
   const visualViewportListeners = new Map();
   const documentListeners = new Map();
+  const gridWrites = [];
   const body = new FakeElement("body");
   body.clientWidth = 390;
   body.clientHeight = 844;
@@ -277,7 +279,10 @@ const createHarness = ({ webgl }) => {
     setTimeout: () => 1,
     clearTimeout() {},
     gridPaper: {
-      writeOnCanvas: () => () => {}
+      writeOnCanvas: (_, __, options) => {
+        gridWrites.push(options);
+        return () => {};
+      }
     }
   };
   const sandbox = {
@@ -321,6 +326,7 @@ const createHarness = ({ webgl }) => {
     body,
     canvases,
     documentListeners,
+    gridWrites,
     image,
     runFrames,
     runLoad,
@@ -360,6 +366,8 @@ test("touch starts both the background transition and a rendered WebGL haze", ()
   (harness.documentListeners.get("click") || []).forEach((listener) => listener({ target: harness.blank }));
   assert.ok(harness.body.classList.contains("fervidumExit"));
   assert.ok(harness.body.classList.contains("fervidumWarpActive"));
+  assert.equal(harness.gridWrites.at(-1).scrollX, 0);
+  assert.equal(harness.gridWrites.at(-1).scrollY, 0);
 
   harness.runFrames(3800);
   assert.ok(!harness.body.classList.contains("fervidumWarpActive"));
@@ -418,6 +426,11 @@ test("the heat haze canvas is opaque and has no CSS frame", () => {
 test("the sweep uses a dynamic viewport and leaves sizing to CSS", () => {
   assert.match(styles, /\.fervidumSweep\s*\{[^}]*height\s*:\s*100dvh/s);
   assert.doesNotMatch(script, /sweepCanvas\.style\.(?:width|height)\s*=/);
+  assert.match(
+    script,
+    /const getSweepViewportSize = \(\) => \(\{\s*width: window\.innerWidth,\s*height: window\.innerHeight\s*\}\);/s
+  );
+  assert.match(pageStyles, /background-attachment\s*:\s*fixed;/);
 });
 
 test("desktop animates its canvas while its background animation remains active", () => {
