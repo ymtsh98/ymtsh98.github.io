@@ -1,0 +1,1025 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>GIF/WebP to APNG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../css/style.css?v=20260803-tools-5">
+  <script src="../../js/box-connections.js?v=20260803-shared-connections-5" defer></script>
+</head>
+<body>
+  <div class="page toolPage">
+    <main class="toolContent contentFrame">
+      <h1>GIF/WebP to APNG</h1>
+      <p class="note">No Uploads, Runs Locally<br>No Additional Quality Loss</p>
+
+      <div class="controls">
+        <label id="dropZone" class="dropZone disabled" for="fileInput">
+          <input id="fileInput" type="file" accept="image/gif,image/webp,.gif,.webp" disabled>
+          <span class="dropTitle">Drop GIF or WebP here</span>
+          <span class="dropHint">or click to choose a file</span>
+        </label>
+        <button id="convertButton" type="button" disabled>Convert to APNG</button>
+        <progress id="progress" max="100" value="0"></progress>
+      </div>
+
+      <p id="status" role="status" aria-live="polite">Checking browser support</p>
+
+      <section id="result" hidden>
+        <img id="preview" alt="Converted APNG preview">
+        <a id="downloadLink" class="download" download>Download APNG</a>
+        <p id="details" class="details"></p>
+      </section>
+    </main>
+
+    <footer class="siteFooter">
+      <p>The source code of this website is licensed under the <a href="../../license.html">MIT License</a>.</p>
+    </footer>
+  </div>
+
+  <script id="workerCode" type="text/worker">
+    const encoder = new TextEncoder();
+    const crcTable = makeCrcTable();
+    const signature = new Uint8Array([
+      137, 80, 78, 71, 13, 10, 26, 10
+    ]);
+
+    function getUint24(view, offset) {
+      return view.getUint8(offset)
+        | view.getUint8(offset + 1) << 8
+        | view.getUint8(offset + 2) << 16;
+    }
+
+    function getWebpInfo(buffer) {
+      const data = new Uint8Array(buffer);
+      const view = new DataView(buffer);
+      const frames = [];
+      let loop = 0;
+      let offset = 12;
+
+      while (offset + 8 <= data.length) {
+        const name = String.fromCharCode(
+          data[offset],
+          data[offset + 1],
+          data[offset + 2],
+          data[offset + 3]
+        );
+        const size = view.getUint32(offset + 4, true);
+        const start = offset + 8;
+
+        if (name === "ANIM" && size >= 6) {
+          loop = view.getUint16(start + 4, true);
+        } else if (name === "ANMF" && size >= 16) {
+          const flags = view.getUint8(start + 15);
+
+          frames.push({
+            x: getUint24(view, start) * 2,
+            y: getUint24(view, start + 3) * 2,
+            width: getUint24(view, start + 6) + 1,
+            height: getUint24(view, start + 9) + 1,
+            reset: (flags & 1) === 1
+          });
+        }
+
+        offset += 8 + size + (size & 1);
+      }
+
+      return { loop, frames };
+    }
+
+    function skipGifBlocks(data, offset) {
+      let next = offset;
+
+      while (next < data.length) {
+        const size = data[next];
+        next += 1;
+
+        if (size === 0) {
+          break;
+        }
+
+        next += size;
+      }
+
+      return next;
+    }
+
+    function getGifInfo(buffer) {
+      const data = new Uint8Array(buffer);
+      const view = new DataView(buffer);
+      const frames = [];
+      let loop = 0;
+      let disposal = 0;
+      let offset = 13;
+      const packed = data[10];
+
+      if (packed & 0x80) {
+        offset += 3 * 2 ** ((packed & 0x07) + 1);
+      }
+
+      while (offset < data.length) {
+        const block = data[offset];
+
+        if (block === 0x3b) {
+          break;
+        }
+
+        if (block === 0x2c) {
+          const x = view.getUint16(offset + 1, true);
+          const y = view.getUint16(offset + 3, true);
+          const width = view.getUint16(offset + 5, true);
+          const height = view.getUint16(offset + 7, true);
+          const imagePacked = data[offset + 9];
+
+          frames.push({
+            x,
+            y,
+            width,
+            height,
+            reset: disposal === 2 || disposal === 3
+          });
+
+          disposal = 0;
+          offset += 10;
+
+          if (imagePacked & 0x80) {
+            offset += 3 * 2 ** ((imagePacked & 0x07) + 1);
+          }
+
+          offset += 1;
+          offset = skipGifBlocks(data, offset);
+          continue;
+        }
+
+        if (block === 0x21) {
+          const label = data[offset + 1];
+
+          if (label === 0xf9) {
+            disposal = (data[offset + 3] >> 2) & 0x07;
+            offset += 8;
+            continue;
+          }
+
+          if (label === 0xff) {
+            const size = data[offset + 2];
+            const start = offset + 3;
+            const name = String.fromCharCode(...data.subarray(start, start + size));
+            let next = start + size;
+
+            while (next < data.length) {
+              const blockSize = data[next];
+              next += 1;
+
+              if (blockSize === 0) {
+                break;
+              }
+
+              if (
+                (name === "NETSCAPE2.0" || name === "ANIMEXTS1.0")
+                && blockSize >= 3
+                && data[next] === 1
+              ) {
+                const count = data[next + 1] | data[next + 2] << 8;
+                loop = count === 0 ? 0 : count + 1;
+              }
+
+              next += blockSize;
+            }
+
+            offset = next;
+            continue;
+          }
+
+          if (label === 0x01) {
+            const size = data[offset + 2];
+            offset = skipGifBlocks(data, offset + 3 + size);
+            disposal = 0;
+            continue;
+          }
+
+          offset = skipGifBlocks(data, offset + 2);
+          continue;
+        }
+
+        break;
+      }
+
+      return { loop, frames };
+    }
+
+    function getFrameRect(index, frames, width, height) {
+      if (index === 0 || !frames[index]) {
+        return { x: 0, y: 0, width, height };
+      }
+
+      const current = frames[index];
+      let left = current.x;
+      let top = current.y;
+      let right = current.x + current.width;
+      let bottom = current.y + current.height;
+      const previous = frames[index - 1];
+
+      if (previous && previous.reset) {
+        left = Math.min(left, previous.x);
+        top = Math.min(top, previous.y);
+        right = Math.max(right, previous.x + previous.width);
+        bottom = Math.max(bottom, previous.y + previous.height);
+      }
+
+      left = Math.max(0, Math.min(left, width - 1));
+      top = Math.max(0, Math.min(top, height - 1));
+      right = Math.max(left + 1, Math.min(right, width));
+      bottom = Math.max(top + 1, Math.min(bottom, height));
+
+      return {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top
+      };
+    }
+
+    function makeCrcTable() {
+      const table = new Uint32Array(256);
+
+      for (let index = 0; index < 256; index += 1) {
+        let value = index;
+
+        for (let bit = 0; bit < 8; bit += 1) {
+          value = value & 1
+            ? 0xedb88320 ^ (value >>> 1)
+            : value >>> 1;
+        }
+
+        table[index] = value >>> 0;
+      }
+
+      return table;
+    }
+
+    function getCrc(type, data) {
+      let value = 0xffffffff;
+
+      for (let index = 0; index < type.length; index += 1) {
+        value = crcTable[(value ^ type[index]) & 0xff] ^ (value >>> 8);
+      }
+
+      for (let index = 0; index < data.length; index += 1) {
+        value = crcTable[(value ^ data[index]) & 0xff] ^ (value >>> 8);
+      }
+
+      return (value ^ 0xffffffff) >>> 0;
+    }
+
+    function makeChunk(name, data) {
+      const type = encoder.encode(name);
+      const chunk = new Uint8Array(data.length + 12);
+      const view = new DataView(chunk.buffer);
+
+      view.setUint32(0, data.length);
+      chunk.set(type, 4);
+      chunk.set(data, 8);
+      view.setUint32(data.length + 8, getCrc(type, data));
+
+      return chunk;
+    }
+
+    function makeHeader(width, height) {
+      const data = new Uint8Array(13);
+      const view = new DataView(data.buffer);
+
+      view.setUint32(0, width);
+      view.setUint32(4, height);
+      data[8] = 8;
+      data[9] = 6;
+
+      return makeChunk("IHDR", data);
+    }
+
+    function makeAnimation(frameCount, loop) {
+      const data = new Uint8Array(8);
+      const view = new DataView(data.buffer);
+
+      view.setUint32(0, frameCount);
+      view.setUint32(4, loop);
+
+      return makeChunk("acTL", data);
+    }
+
+    function getGreatestDivisor(left, right) {
+      let first = left;
+      let second = right;
+
+      while (second !== 0) {
+        const next = first % second;
+        first = second;
+        second = next;
+      }
+
+      return first;
+    }
+
+    function getDelay(value) {
+      const delay = Math.max(0, Math.round(value));
+
+      if (delay <= 65535) {
+        return [delay, 1000];
+      }
+
+      const divisor = getGreatestDivisor(delay, 1000);
+      const numerator = delay / divisor;
+      const denominator = 1000 / divisor;
+
+      if (numerator <= 65535) {
+        return [numerator, denominator];
+      }
+
+      const scaledDenominator = Math.max(1, Math.floor(65535 * 1000 / delay));
+      const scaledNumerator = Math.min(65535, Math.round(delay * scaledDenominator / 1000));
+
+      return [scaledNumerator, scaledDenominator];
+    }
+
+    function makeFrame(sequence, rect, delay, blend) {
+      const data = new Uint8Array(26);
+      const view = new DataView(data.buffer);
+      const fraction = getDelay(delay);
+
+      view.setUint32(0, sequence);
+      view.setUint32(4, rect.width);
+      view.setUint32(8, rect.height);
+      view.setUint32(12, rect.x);
+      view.setUint32(16, rect.y);
+      view.setUint16(20, fraction[0]);
+      view.setUint16(22, fraction[1]);
+      data[24] = 0;
+      data[25] = blend;
+
+      return makeChunk("fcTL", data);
+    }
+
+    function getDifferenceRect(previous, current, width, height) {
+      let left = width;
+      let top = height;
+      let right = -1;
+      let bottom = -1;
+
+      for (let y = 0; y < height; y += 1) {
+        const row = y * width * 4;
+
+        for (let x = 0; x < width; x += 1) {
+          const offset = row + x * 4;
+
+          if (
+            previous[offset] !== current[offset]
+            || previous[offset + 1] !== current[offset + 1]
+            || previous[offset + 2] !== current[offset + 2]
+            || previous[offset + 3] !== current[offset + 3]
+          ) {
+            left = Math.min(left, x);
+            top = Math.min(top, y);
+            right = Math.max(right, x);
+            bottom = Math.max(bottom, y);
+          }
+        }
+      }
+
+      if (right < 0) {
+        return null;
+      }
+
+      return {
+        x: left,
+        y: top,
+        width: right - left + 1,
+        height: bottom - top + 1
+      };
+    }
+
+    function getPaeth(left, up, corner) {
+      const value = left + up - corner;
+      const leftDistance = Math.abs(value - left);
+      const upDistance = Math.abs(value - up);
+      const cornerDistance = Math.abs(value - corner);
+
+      if (leftDistance <= upDistance && leftDistance <= cornerDistance) {
+        return left;
+      }
+
+      return upDistance <= cornerDistance ? up : corner;
+    }
+
+    function getFilteredValue(filter, value, left, up, corner) {
+      if (filter === 0) {
+        return value;
+      }
+
+      if (filter === 1) {
+        return value - left;
+      }
+
+      if (filter === 2) {
+        return value - up;
+      }
+
+      if (filter === 3) {
+        return value - Math.floor((left + up) / 2);
+      }
+
+      return value - getPaeth(left, up, corner);
+    }
+
+    function getFilterScore(source, row, rowSize, filter) {
+      const sourceOffset = row * rowSize;
+      const previousOffset = sourceOffset - rowSize;
+      let score = 0;
+
+      for (let index = 0; index < rowSize; index += 1) {
+        const value = source[sourceOffset + index];
+        const left = index < 4 ? 0 : source[sourceOffset + index - 4];
+        const up = row === 0 ? 0 : source[previousOffset + index];
+        const corner = row === 0 || index < 4
+          ? 0
+          : source[previousOffset + index - 4];
+        const filtered = getFilteredValue(
+          filter,
+          value,
+          left,
+          up,
+          corner
+        ) & 0xff;
+
+        score += Math.min(filtered, 256 - filtered);
+      }
+
+      return score;
+    }
+
+    function makeFiltered(frame, width, height, adaptive) {
+      const rowSize = width * 4;
+      const source = ArrayBuffer.isView(frame)
+        ? new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength)
+        : new Uint8Array(frame);
+      const filtered = new Uint8Array((rowSize + 1) * height);
+
+      for (let row = 0; row < height; row += 1) {
+        const sourceOffset = row * rowSize;
+        const outputOffset = row * (rowSize + 1);
+        let bestFilter = 1;
+
+        if (adaptive) {
+          bestFilter = 0;
+          let bestScore = getFilterScore(source, row, rowSize, 0);
+
+          for (let filter = 1; filter <= 4; filter += 1) {
+            const score = getFilterScore(source, row, rowSize, filter);
+
+            if (score < bestScore) {
+              bestFilter = filter;
+              bestScore = score;
+            }
+          }
+        }
+
+        filtered[outputOffset] = bestFilter;
+
+        for (let index = 0; index < rowSize; index += 1) {
+          const value = source[sourceOffset + index];
+          const left = index < 4 ? 0 : source[sourceOffset + index - 4];
+          const up = row === 0 ? 0 : source[sourceOffset - rowSize + index];
+          const corner = row === 0 || index < 4
+            ? 0
+            : source[sourceOffset - rowSize + index - 4];
+
+          filtered[outputOffset + index + 1] = getFilteredValue(
+            bestFilter,
+            value,
+            left,
+            up,
+            corner
+          );
+        }
+      }
+
+      return filtered;
+    }
+
+    async function compressData(data) {
+      const stream = new Blob([data])
+        .stream()
+        .pipeThrough(new CompressionStream("deflate"));
+      const buffer = await new Response(stream).arrayBuffer();
+
+      return new Uint8Array(buffer);
+    }
+
+    async function compressFrame(frame, width, height) {
+      const adaptive = await compressData(
+        makeFiltered(frame, width, height, true)
+      );
+      const sub = await compressData(
+        makeFiltered(frame, width, height, false)
+      );
+
+      return adaptive.length <= sub.length ? adaptive : sub;
+    }
+
+    function appendImage(chunks, data) {
+      const size = 1024 * 1024;
+
+      for (let offset = 0; offset < data.length; offset += size) {
+        chunks.push(makeChunk("IDAT", data.subarray(offset, offset + size)));
+      }
+    }
+
+    function appendFrame(chunks, data, sequence) {
+      const size = 1024 * 1024;
+      let next = sequence;
+
+      for (let offset = 0; offset < data.length; offset += size) {
+        const part = data.subarray(offset, offset + size);
+        const frame = new Uint8Array(part.length + 4);
+        const view = new DataView(frame.buffer);
+
+        view.setUint32(0, next);
+        frame.set(part, 4);
+        chunks.push(makeChunk("fdAT", frame));
+        next += 1;
+      }
+
+      return next;
+    }
+
+    function report(value, index, total, phase) {
+      postMessage({
+        action: "progress",
+        value,
+        index,
+        total,
+        phase
+      });
+    }
+
+    async function encodePng(decoder, frameCount, info) {
+      const chunks = [signature];
+      const animated = frameCount > 1;
+      const canvas = new OffscreenCanvas(1, 1);
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      let sequence = 0;
+      let width = 0;
+      let height = 0;
+      let previous = null;
+
+      for (let index = 0; index < frameCount; index += 1) {
+        report(index / frameCount, index, frameCount, "decode");
+
+        const decoded = await decoder.decode({
+          frameIndex: index,
+          completeFramesOnly: true
+        });
+        const frame = decoded.image;
+
+        if (index === 0) {
+          width = frame.displayWidth;
+          height = frame.displayHeight;
+          canvas.width = width;
+          canvas.height = height;
+          chunks.push(makeHeader(width, height));
+
+          if (animated) {
+            chunks.push(makeAnimation(frameCount, info.loop));
+          }
+        }
+
+        context.clearRect(0, 0, width, height);
+        context.drawImage(frame, 0, 0, width, height);
+
+        const delay = Math.round((frame.duration || 0) / 1000);
+        const current = context.getImageData(0, 0, width, height);
+        let rect = {
+          x: 0,
+          y: 0,
+          width,
+          height
+        };
+        let blend = 0;
+        let pixels = current;
+
+        if (previous) {
+          const difference = getDifferenceRect(
+            previous.data,
+            current.data,
+            width,
+            height
+          );
+
+          if (difference) {
+            rect = difference;
+            pixels = context.getImageData(
+              rect.x,
+              rect.y,
+              rect.width,
+              rect.height
+            );
+          } else {
+            rect = {
+              x: 0,
+              y: 0,
+              width: 1,
+              height: 1
+            };
+            blend = 1;
+            pixels = new ImageData(1, 1);
+          }
+        }
+
+        frame.close();
+
+        if (animated) {
+          chunks.push(makeFrame(sequence, rect, delay, blend));
+          sequence += 1;
+        }
+
+        report(index / frameCount, index, frameCount, "encode");
+
+        const compressed = await compressFrame(
+          pixels.data,
+          rect.width,
+          rect.height
+        );
+
+        previous = current;
+        pixels = null;
+        report((index + 1) / frameCount, index, frameCount, "encoded");
+
+        if (index === 0) {
+          appendImage(chunks, compressed);
+        } else {
+          sequence = appendFrame(chunks, compressed, sequence);
+        }
+      }
+
+      chunks.push(makeChunk("IEND", new Uint8Array()));
+      report(1, frameCount - 1, frameCount, "finish");
+
+      return {
+        blob: new Blob(chunks, { type: "image/png" }),
+        width,
+        height
+      };
+    }
+
+    async function getSupport() {
+      const imageDecoder = "ImageDecoder" in self;
+      const compressionStream = "CompressionStream" in self;
+      const offscreenCanvas = "OffscreenCanvas" in self;
+      let gif = false;
+      let webp = false;
+
+      if (imageDecoder) {
+        gif = await ImageDecoder.isTypeSupported("image/gif");
+        webp = await ImageDecoder.isTypeSupported("image/webp");
+      }
+
+      postMessage({
+        action: "support",
+        imageDecoder,
+        compressionStream,
+        offscreenCanvas,
+        gif,
+        webp
+      });
+    }
+
+    async function convertFile(file, type) {
+      postMessage({ action: "reading" });
+
+      const buffer = await file.arrayBuffer();
+      const info = type === "image/gif"
+        ? getGifInfo(buffer)
+        : getWebpInfo(buffer);
+      const decoder = new ImageDecoder({
+        data: buffer,
+        type,
+        preferAnimation: true,
+        transfer: [buffer]
+      });
+
+      await decoder.tracks.ready;
+      await decoder.completed;
+
+      const track = decoder.tracks.selectedTrack;
+      const frameCount = track.frameCount;
+      const encoded = await encodePng(
+        decoder,
+        frameCount,
+        info
+      );
+
+      decoder.close();
+
+      postMessage({
+        action: "complete",
+        blob: encoded.blob,
+        width: encoded.width,
+        height: encoded.height,
+        frameCount,
+        loop: info.loop
+      });
+    }
+
+    self.addEventListener("message", async (event) => {
+      const data = event.data;
+
+      if (data.action === "support") {
+        await getSupport();
+      } else if (data.action === "convert") {
+        await convertFile(data.file, data.type);
+      }
+    });
+  </script>
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const convertButton = document.getElementById("convertButton");
+    const progress = document.getElementById("progress");
+    const status = document.getElementById("status");
+    const result = document.getElementById("result");
+    const preview = document.getElementById("preview");
+    const downloadLink = document.getElementById("downloadLink");
+    const details = document.getElementById("details");
+    const workerCode = document.getElementById("workerCode");
+
+    let outputUrl = "";
+    let worker = null;
+    let gifSupported = false;
+    let webpSupported = false;
+    let dragDepth = 0;
+
+    function formatBytes(size) {
+      if (size < 1024) {
+        return `${size} B`;
+      }
+
+      if (size < 1024 * 1024) {
+        return `${(size / 1024).toFixed(1)} KB`;
+      }
+
+      return `${(size / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function formatLoop(loop) {
+      return loop === 0 ? "infinite loop" : `${loop} play${loop === 1 ? "" : "s"}`;
+    }
+
+    function makeName(name) {
+      const base = name.replace(/\.(gif|webp)$/i, "");
+      return `${base || "output"}.png`;
+    }
+
+    function getType(file) {
+      if (file.type === "image/gif" || /\.gif$/i.test(file.name)) {
+        return "image/gif";
+      }
+
+      if (file.type === "image/webp" || /\.webp$/i.test(file.name)) {
+        return "image/webp";
+      }
+
+      return "";
+    }
+
+    function getLabel(type) {
+      return type === "image/gif" ? "GIF" : "WebP";
+    }
+
+    function resetResult() {
+      if (outputUrl) {
+        URL.revokeObjectURL(outputUrl);
+        outputUrl = "";
+      }
+
+      preview.removeAttribute("src");
+      downloadLink.removeAttribute("href");
+      result.hidden = true;
+      details.textContent = "";
+      progress.value = 0;
+    }
+
+    function setEnabled(enabled) {
+      fileInput.disabled = !enabled;
+      dropZone.classList.toggle("disabled", !enabled);
+      convertButton.disabled = !enabled || !fileInput.files[0];
+    }
+
+    function updateProgress(data) {
+      progress.value = data.value * 100;
+
+      if (data.phase === "decode") {
+        status.textContent = `Decoding frame ${data.index + 1} of ${data.total}`;
+      } else if (data.phase === "encode" || data.phase === "encoded") {
+        status.textContent = `Encoding frame ${data.index + 1} of ${data.total}`;
+      } else {
+        status.textContent = "Finishing PNG";
+      }
+    }
+
+    function completeConversion(data) {
+      const file = fileInput.files[0];
+
+      outputUrl = URL.createObjectURL(data.blob);
+      preview.src = outputUrl;
+      downloadLink.href = outputUrl;
+      downloadLink.download = makeName(file.name);
+      downloadLink.textContent = data.frameCount > 1 ? "Download APNG" : "Download PNG";
+      details.textContent = data.frameCount > 1
+        ? `${data.width} x ${data.height} | ${data.frameCount} frames | ${formatLoop(data.loop)} | ${formatBytes(file.size)} to ${formatBytes(data.blob.size)}`
+        : `${data.width} x ${data.height} | 1 frame | ${formatBytes(file.size)} to ${formatBytes(data.blob.size)}`;
+      result.hidden = false;
+
+      progress.value = 100;
+      status.textContent = data.frameCount > 1
+        ? "Conversion complete"
+        : "The input has one frame, so the output is a regular PNG";
+      setEnabled(true);
+    }
+
+    function applySupport(data) {
+      if (!data.imageDecoder) {
+        status.textContent = "This browser does not support ImageDecoder in Web Workers";
+        return;
+      }
+
+      if (!data.offscreenCanvas) {
+        status.textContent = "This browser does not support OffscreenCanvas in Web Workers";
+        return;
+      }
+
+      if (!data.compressionStream) {
+        status.textContent = "This browser does not support CompressionStream in Web Workers";
+        return;
+      }
+
+      gifSupported = data.gif;
+      webpSupported = data.webp;
+
+      if (!gifSupported && !webpSupported) {
+        status.textContent = "This browser cannot decode GIF or WebP with ImageDecoder";
+        return;
+      }
+
+      fileInput.disabled = false;
+      dropZone.classList.remove("disabled");
+      status.textContent = "Select or drop a GIF or WebP file";
+    }
+
+    function handleWorkerMessage(event) {
+      const data = event.data;
+
+      if (data.action === "support") {
+        applySupport(data);
+      } else if (data.action === "reading") {
+        const file = fileInput.files[0];
+        status.textContent = `Reading ${getLabel(getType(file))}`;
+      } else if (data.action === "progress") {
+        updateProgress(data);
+      } else if (data.action === "complete") {
+        completeConversion(data);
+      }
+    }
+
+    function initialize() {
+      if (!window.isSecureContext) {
+        status.textContent = "This tool requires HTTPS or localhost";
+        return;
+      }
+
+      const workerUrl = URL.createObjectURL(new Blob(
+        [workerCode.textContent],
+        { type: "text/javascript" }
+      ));
+
+      worker = new Worker(workerUrl);
+      URL.revokeObjectURL(workerUrl);
+      worker.addEventListener("message", handleWorkerMessage);
+      worker.postMessage({ action: "support" });
+    }
+
+    dropZone.addEventListener("dragenter", (event) => {
+      event.preventDefault();
+
+      if (fileInput.disabled) {
+        return;
+      }
+
+      dragDepth += 1;
+      dropZone.classList.add("dragging");
+    });
+
+    dropZone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+    });
+
+    dropZone.addEventListener("dragleave", (event) => {
+      event.preventDefault();
+
+      if (fileInput.disabled) {
+        return;
+      }
+
+      dragDepth = Math.max(0, dragDepth - 1);
+
+      if (dragDepth === 0) {
+        dropZone.classList.remove("dragging");
+      }
+    });
+
+    dropZone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      dragDepth = 0;
+      dropZone.classList.remove("dragging");
+
+      if (fileInput.disabled || event.dataTransfer.files.length === 0) {
+        return;
+      }
+
+      const transfer = new DataTransfer();
+      transfer.items.add(event.dataTransfer.files[0]);
+      fileInput.files = transfer.files;
+      fileInput.dispatchEvent(new Event("change"));
+    });
+
+    fileInput.addEventListener("change", () => {
+      resetResult();
+
+      const file = fileInput.files[0];
+      const type = file ? getType(file) : "";
+      const supported = type === "image/gif" ? gifSupported : webpSupported;
+      const valid = Boolean(file && type && supported);
+      const invalid = Boolean(file && (!type || !supported));
+
+      dropZone.classList.toggle("selected", valid);
+      dropZone.classList.toggle("error", invalid);
+      status.classList.toggle("error", invalid);
+      convertButton.classList.toggle("error", invalid);
+      convertButton.disabled = !valid;
+
+      if (!file) {
+        status.textContent = "Select or drop a GIF or WebP file";
+      } else if (!type) {
+        const error = document.createElement("span");
+        const name = document.createTextNode(file.name);
+        const message = document.createTextNode(" — Only GIF and WebP files are supported");
+
+        error.className = "fileError";
+        error.textContent = "✕";
+        error.setAttribute("aria-label", "Unsupported file");
+        status.replaceChildren(error, name, message);
+      } else if (!supported) {
+        const error = document.createElement("span");
+        const name = document.createTextNode(file.name);
+        const message = document.createTextNode(` — This browser cannot decode ${getLabel(type)} with ImageDecoder`);
+
+        error.className = "fileError";
+        error.textContent = "✕";
+        error.setAttribute("aria-label", "Unsupported file");
+        status.replaceChildren(error, name, message);
+      } else {
+        const check = document.createElement("span");
+        const name = document.createTextNode(file.name);
+        const size = document.createTextNode(` (${formatBytes(file.size)})`);
+
+        check.className = "fileCheck";
+        check.textContent = "✓";
+        check.setAttribute("aria-label", "File selected");
+        status.replaceChildren(check, name, size);
+      }
+    });
+
+    convertButton.addEventListener("click", () => {
+      const file = fileInput.files[0];
+
+      if (!file) {
+        return;
+      }
+
+      resetResult();
+      setEnabled(false);
+      status.classList.remove("error");
+      status.textContent = `Reading ${getLabel(getType(file))}`;
+
+      worker.postMessage({
+        action: "convert",
+        file,
+        type: getType(file)
+      });
+    });
+
+    initialize();
+  </script>
+</body>
+</html>

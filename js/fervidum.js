@@ -16,7 +16,6 @@ const waveFadeDuration = 260;
 const maxWavePixels = 1200000;
 const simulationCellSize = 8;
 const maxSimulationSide = 176;
-const connectionEdgeOffsetMax = 0.38;
 
 let backgroundCanvas;
 let backgroundContext;
@@ -35,8 +34,6 @@ let fervidumSweepProgress = 0;
 let lastFervidumSweepRender = 0;
 let restoreFadeTimer;
 let cancelGridRewrite;
-let connectionLayer;
-let connectionFrame;
 let waveFrame;
 let waveStartTime = 0;
 let waveLastRender = 0;
@@ -44,7 +41,6 @@ let waveResizeFrame;
 let waveClearTimer;
 let waveFadeStart;
 const waveLayers = [];
-const svgNamespace = "http://www.w3.org/2000/svg";
 
 const createBackgroundCanvas = () => {
   if (backgroundCanvas) {
@@ -72,236 +68,6 @@ const getBackgroundViewportSize = () => ({
   width: window.innerWidth,
   height: window.innerHeight
 });
-
-const getConnectionHosts = () => {
-  const pageX = window.scrollX;
-  const pageY = window.scrollY;
-
-  return Array.from(
-    document.querySelectorAll(".profileLinks a, .blogLinks, .tile, .siteFooter")
-  ).map((element) => {
-    const rect = element.getBoundingClientRect();
-    const connectionRect = {
-      left: rect.left + pageX,
-      top: rect.top + pageY,
-      right: rect.right + pageX,
-      bottom: rect.bottom + pageY,
-      width: rect.width,
-      height: rect.height
-    };
-
-    return {
-      rect: connectionRect,
-      center: {
-        x: connectionRect.left + connectionRect.width / 2,
-        y: connectionRect.top + connectionRect.height / 2
-      }
-    };
-  }).filter(({ rect }) => rect.width > 0 && rect.height > 0);
-};
-
-const getConnectionLayerSize = () => {
-  const root = document.documentElement;
-  const body = document.body;
-
-  return {
-    width: Math.max(root.clientWidth, root.scrollWidth, body.clientWidth, body.scrollWidth),
-    height: Math.max(root.clientHeight, root.scrollHeight, body.clientHeight, body.scrollHeight)
-  };
-};
-
-const boxDistance = (first, second) => {
-  const horizontalGap = Math.max(
-    0,
-    first.rect.left - second.rect.right,
-    second.rect.left - first.rect.right
-  );
-  const verticalGap = Math.max(
-    0,
-    first.rect.top - second.rect.bottom,
-    second.rect.top - first.rect.bottom
-  );
-
-  return Math.hypot(horizontalGap, verticalGap);
-};
-
-const stableRandom = (seed) => {
-  const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
-  return value - Math.floor(value);
-};
-
-const getConnectionEdgeOffset = (from, to) => {
-  const seed = (from + 1) * 31 + (to + 1) * 17;
-
-  return (stableRandom(seed) * 2 - 1) * connectionEdgeOffsetMax;
-};
-
-const getConnectionAxis = (first, second) => {
-  const horizontalGap = Math.max(
-    0,
-    first.rect.left - second.rect.right,
-    second.rect.left - first.rect.right
-  );
-  const verticalGap = Math.max(
-    0,
-    first.rect.top - second.rect.bottom,
-    second.rect.top - first.rect.bottom
-  );
-
-  if (horizontalGap === verticalGap) {
-    return Math.abs(first.center.x - second.center.x) >= Math.abs(first.center.y - second.center.y)
-      ? "horizontal"
-      : "vertical";
-  }
-
-  return horizontalGap > verticalGap ? "horizontal" : "vertical";
-};
-
-const getBorderPoint = ({ rect, center }, target, axis, edgeOffset = 0) => {
-  const inset = Math.min(10, Math.min(rect.width, rect.height) / 4);
-  const direction = Math.sign(
-    axis === "horizontal" ? target.x - center.x : target.y - center.y
-  ) || 1;
-
-  if (axis === "horizontal") {
-    return {
-      x: center.x + direction * rect.width / 2,
-      y: clamp(center.y + edgeOffset * rect.height, rect.top + inset, rect.bottom - inset)
-    };
-  }
-
-  return {
-    x: clamp(center.x + edgeOffset * rect.width, rect.left + inset, rect.right - inset),
-    y: center.y + direction * rect.height / 2
-  };
-};
-
-const getTwoBendPath = (start, end, axis) => {
-  if (axis === "horizontal") {
-    const bendX = (start.x + end.x) / 2;
-    return `M ${start.x} ${start.y} L ${bendX} ${start.y} L ${bendX} ${end.y} L ${end.x} ${end.y}`;
-  }
-
-  const bendY = (start.y + end.y) / 2;
-  return `M ${start.x} ${start.y} L ${start.x} ${bendY} L ${end.x} ${bendY} L ${end.x} ${end.y}`;
-};
-
-const getConnectionEdges = (hosts) => {
-  if (hosts.length < 2) {
-    return [];
-  }
-
-  const connected = new Set([0]);
-  const edges = [];
-
-  while (connected.size < hosts.length) {
-    let closestEdge;
-
-    connected.forEach((from) => {
-      hosts.forEach((host, to) => {
-        if (connected.has(to)) {
-          return;
-        }
-
-        const distance = boxDistance(hosts[from], host);
-
-        if (!closestEdge || distance < closestEdge.distance) {
-          closestEdge = { from, to, distance };
-        }
-      });
-    });
-
-    edges.push(closestEdge);
-    connected.add(closestEdge.to);
-  }
-
-  return edges;
-};
-
-const drawConnections = () => {
-  connectionFrame = undefined;
-
-  const { width, height } = getConnectionLayerSize();
-  const hosts = getConnectionHosts();
-  const ink = getComputedStyle(document.documentElement)
-    .getPropertyValue("--connector")
-    .trim() || "#4e5f72";
-  const paths = document.createDocumentFragment();
-
-  connectionLayer.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  connectionLayer.setAttribute("width", width);
-  connectionLayer.setAttribute("height", height);
-  connectionLayer.style.width = `${width}px`;
-  connectionLayer.style.height = `${height}px`;
-
-  getConnectionEdges(hosts).forEach(({ from, to }) => {
-    const axis = getConnectionAxis(hosts[from], hosts[to]);
-    const start = getBorderPoint(
-      hosts[from],
-      hosts[to].center,
-      axis,
-      getConnectionEdgeOffset(from, to)
-    );
-    const end = getBorderPoint(
-      hosts[to],
-      hosts[from].center,
-      axis,
-      getConnectionEdgeOffset(to, from)
-    );
-    const path = document.createElementNS(svgNamespace, "path");
-
-    path.setAttribute("d", getTwoBendPath(start, end, axis));
-    path.setAttribute("fill", "none");
-    path.setAttribute("stroke", ink);
-    path.setAttribute("stroke-linecap", "round");
-    path.setAttribute("stroke-width", "2");
-    path.setAttribute("opacity", "0.84");
-    paths.appendChild(path);
-  });
-
-  connectionLayer.replaceChildren(paths);
-};
-
-const scheduleConnections = () => {
-  if (!connectionFrame) {
-    connectionFrame = requestAnimationFrame(drawConnections);
-  }
-};
-
-const createConnections = () => {
-  connectionLayer = document.createElementNS(svgNamespace, "svg");
-  connectionLayer.classList.add("boxConnections");
-  connectionLayer.setAttribute("aria-hidden", "true");
-  document.body.insertAdjacentElement("afterbegin", connectionLayer);
-
-  if (canUseTouchEffects) {
-    // SVG shares document coordinates with the boxes, so pinch-zoom needs no redraw.
-    window.addEventListener("load", scheduleConnections, { once: true });
-    window.addEventListener("orientationchange", scheduleConnections, { passive: true });
-    scheduleConnections();
-    return;
-  }
-
-  const resizeObserver = new ResizeObserver(scheduleConnections);
-  const observeConnectionHosts = () => {
-    document.querySelectorAll(".page, .profileLinks, .gallery, .profileLinks a, .blogLinks, .tile, .siteFooter")
-      .forEach((element) => resizeObserver.observe(element));
-  };
-
-  observeConnectionHosts();
-
-  new MutationObserver(() => {
-    observeConnectionHosts();
-    scheduleConnections();
-  }).observe(document.querySelector(".page"), {
-    childList: true,
-    subtree: true
-  });
-
-  window.addEventListener("resize", scheduleConnections, { passive: true });
-  document.addEventListener("load", scheduleConnections, true);
-  scheduleConnections();
-};
 
 const pushHeap = (heap, entry) => {
   heap.push(entry);
@@ -1183,5 +949,3 @@ if (canUseHoverEffects) {
 } else if (canUseTouchEffects) {
   initializeTouchEffects();
 }
-
-createConnections();
