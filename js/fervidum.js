@@ -7,7 +7,7 @@ const hoverWaveEnabled = true;
 // Treat every non-hover layout as touch, including browsers that omit pointer capability details.
 const canUseTouchEffects = !canUseHoverEffects;
 const duration = 5000;
-const sweepDuration = 4000;
+const fervidumSweepDuration = 4000;
 const restoreFadeDuration = 460;
 const warpDelay = 0;
 const waveFrameInterval = 1000 / 30;
@@ -18,8 +18,8 @@ const simulationCellSize = 8;
 const maxSimulationSide = 176;
 const connectionEdgeOffsetMax = 0.38;
 
-let sweepCanvas;
-let sweepContext;
+let backgroundCanvas;
+let backgroundContext;
 let inkCanvas;
 let inkContext;
 let inkImageData;
@@ -28,11 +28,11 @@ let inkGrain;
 let inkWidth;
 let inkHeight;
 let inkMaxArrival;
-let sweepFrame;
-let sweepResizeFrame;
-let sweepStartTime = 0;
-let sweepProgress = 0;
-let lastSweepRender = 0;
+let backgroundFrame;
+let backgroundResizeFrame;
+let fervidumSweepStartTime = 0;
+let fervidumSweepProgress = 0;
+let lastFervidumSweepRender = 0;
 let restoreFadeTimer;
 let cancelGridRewrite;
 let connectionLayer;
@@ -46,25 +46,29 @@ let waveFadeStart;
 const waveLayers = [];
 const svgNamespace = "http://www.w3.org/2000/svg";
 
-const createSweep = () => {
-  sweepCanvas = document.createElement("canvas");
-  sweepCanvas.className = "fervidumSweep";
-  sweepCanvas.setAttribute("aria-hidden", "true");
-  sweepContext = sweepCanvas.getContext("2d", { alpha: true });
+const createBackgroundCanvas = () => {
+  if (backgroundCanvas) {
+    return;
+  }
+
+  backgroundCanvas = document.createElement("canvas");
+  backgroundCanvas.className = "backgroundCanvas";
+  backgroundCanvas.setAttribute("aria-hidden", "true");
+  backgroundContext = backgroundCanvas.getContext("2d", { alpha: true });
   inkCanvas = document.createElement("canvas");
   inkContext = inkCanvas.getContext("2d", { alpha: true });
 
-  document.body.insertAdjacentElement("afterbegin", sweepCanvas);
-  window.addEventListener("resize", scheduleSweepResize, { passive: true });
-  window.visualViewport?.addEventListener("resize", scheduleSweepResize, { passive: true });
-  window.visualViewport?.addEventListener("scroll", scheduleSweepResize, { passive: true });
+  document.body.insertAdjacentElement("afterbegin", backgroundCanvas);
+  window.addEventListener("resize", scheduleBackgroundResize, { passive: true });
+  window.visualViewport?.addEventListener("resize", scheduleBackgroundResize, { passive: true });
+  window.visualViewport?.addEventListener("scroll", scheduleBackgroundResize, { passive: true });
 };
 
 const easeInOut = (value) => value * value * (3 - 2 * value);
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-const getSweepViewportSize = () => ({
+const getBackgroundViewportSize = () => ({
   width: window.innerWidth,
   height: window.innerHeight
 });
@@ -445,27 +449,27 @@ const createArrivalMap = () => {
   });
 };
 
-const resizeSweep = () => {
-  const { width, height } = getSweepViewportSize();
+const resizeBackgroundCanvas = () => {
+  const { width, height } = getBackgroundViewportSize();
   const pixelRatio = window.devicePixelRatio || 1;
   const canvasWidth = Math.round(width * pixelRatio);
   const canvasHeight = Math.round(height * pixelRatio);
 
-  if (sweepCanvas.width === canvasWidth && sweepCanvas.height === canvasHeight) {
+  if (backgroundCanvas.width === canvasWidth && backgroundCanvas.height === canvasHeight) {
     return false;
   }
 
-  sweepCanvas.width = canvasWidth;
-  sweepCanvas.height = canvasHeight;
-  sweepContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-  sweepContext.imageSmoothingEnabled = true;
-  sweepContext.imageSmoothingQuality = "high";
+  backgroundCanvas.width = canvasWidth;
+  backgroundCanvas.height = canvasHeight;
+  backgroundContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  backgroundContext.imageSmoothingEnabled = true;
+  backgroundContext.imageSmoothingQuality = "high";
 
   return true;
 };
 
-const renderSweep = (progress) => {
-  const { width, height } = getSweepViewportSize();
+const renderFervidumSweep = (progress) => {
+  const { width, height } = getBackgroundViewportSize();
   const phase = progress * inkMaxArrival * 1.05;
   const edgeSoftness = Math.max(1.2, inkMaxArrival * 0.028);
   const data = inkImageData.data;
@@ -488,91 +492,91 @@ const renderSweep = (progress) => {
   }
 
   inkContext.putImageData(inkImageData, 0, 0);
-  sweepContext.clearRect(0, 0, width, height);
-  sweepContext.globalAlpha = 0.38;
-  sweepContext.filter = "blur(10px)";
-  sweepContext.drawImage(inkCanvas, 0, 0, width, height);
-  sweepContext.globalAlpha = 1;
-  sweepContext.filter = "none";
-  sweepContext.drawImage(inkCanvas, 0, 0, width, height);
+  backgroundContext.clearRect(0, 0, width, height);
+  backgroundContext.globalAlpha = 0.38;
+  backgroundContext.filter = "blur(10px)";
+  backgroundContext.drawImage(inkCanvas, 0, 0, width, height);
+  backgroundContext.globalAlpha = 1;
+  backgroundContext.filter = "none";
+  backgroundContext.drawImage(inkCanvas, 0, 0, width, height);
 
   const settleProgress = Math.max(0, (progress - 0.82) / 0.18);
 
-  sweepContext.globalAlpha = easeInOut(settleProgress);
-  sweepContext.fillStyle = "#fd9e44";
-  sweepContext.fillRect(0, 0, width, height);
-  sweepContext.globalAlpha = 1;
+  backgroundContext.globalAlpha = easeInOut(settleProgress);
+  backgroundContext.fillStyle = "#fd9e44";
+  backgroundContext.fillRect(0, 0, width, height);
+  backgroundContext.globalAlpha = 1;
 };
 
-const scheduleSweepResize = () => {
-  if (!sweepCanvas || sweepResizeFrame) {
+const scheduleBackgroundResize = () => {
+  if (!backgroundCanvas || backgroundResizeFrame) {
     return;
   }
 
-  sweepResizeFrame = requestAnimationFrame(() => {
-    sweepResizeFrame = undefined;
+  backgroundResizeFrame = requestAnimationFrame(() => {
+    backgroundResizeFrame = undefined;
 
     if (
-      !sweepCanvas.classList.contains("is-active") ||
-      sweepCanvas.classList.contains("is-restoring")
+      !backgroundCanvas.classList.contains("is-active") ||
+      backgroundCanvas.classList.contains("is-restoring")
     ) {
       return;
     }
 
-    if (resizeSweep()) {
-      renderSweep(sweepProgress);
+    if (resizeBackgroundCanvas()) {
+      renderFervidumSweep(fervidumSweepProgress);
     }
   });
 };
 
-const startSweep = () => {
-  cancelAnimationFrame(sweepFrame);
-  cancelAnimationFrame(sweepResizeFrame);
-  sweepResizeFrame = undefined;
+const startFervidumSweep = () => {
+  cancelAnimationFrame(backgroundFrame);
+  cancelAnimationFrame(backgroundResizeFrame);
+  backgroundResizeFrame = undefined;
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
-  sweepCanvas.classList.remove("is-restoring", "is-fading");
+  backgroundCanvas.classList.remove("is-restoring", "is-fading");
 
-  sweepStartTime = performance.now();
-  sweepProgress = 0;
-  resizeSweep();
+  fervidumSweepStartTime = performance.now();
+  fervidumSweepProgress = 0;
+  resizeBackgroundCanvas();
   createArrivalMap();
-  lastSweepRender = 0;
-  sweepCanvas.classList.add("is-active");
+  lastFervidumSweepRender = 0;
+  backgroundCanvas.classList.add("is-active");
 
   const draw = (now) => {
-    const progress = Math.min((now - sweepStartTime) / sweepDuration, 1);
+    const progress = Math.min((now - fervidumSweepStartTime) / fervidumSweepDuration, 1);
 
-    sweepProgress = progress;
+    fervidumSweepProgress = progress;
 
-    if (now - lastSweepRender >= 33 || progress === 1) {
-      renderSweep(progress);
-      lastSweepRender = now;
+    if (now - lastFervidumSweepRender >= 33 || progress === 1) {
+      renderFervidumSweep(progress);
+      lastFervidumSweepRender = now;
     }
 
     if (progress < 1) {
-      sweepFrame = requestAnimationFrame(draw);
+      backgroundFrame = requestAnimationFrame(draw);
     }
   };
 
-  renderSweep(0);
-  sweepFrame = requestAnimationFrame(draw);
+  renderFervidumSweep(0);
+  backgroundFrame = requestAnimationFrame(draw);
 };
 
-const stopSweep = () => {
-  cancelAnimationFrame(sweepFrame);
-  sweepCanvas.classList.remove("is-active");
-  sweepContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+const clearBackgroundCanvas = () => {
+  cancelAnimationFrame(backgroundFrame);
+  backgroundCanvas.classList.remove("is-active");
+  backgroundContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
 };
 
-const finishFervidumExit = () => {
-  cancelAnimationFrame(sweepFrame);
+const finishBackgroundTransition = () => {
+  cancelAnimationFrame(backgroundFrame);
   stopWave();
   cancelGridRewrite?.();
   cancelGridRewrite = undefined;
   clearTimeout(restoreFadeTimer);
-  sweepCanvas.classList.remove("is-active", "is-restoring", "is-fading");
-  sweepContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  backgroundCanvas.classList.remove("is-active", "is-restoring", "is-fading");
+  backgroundContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
   document.body.classList.remove(
     "fervidumActive",
     "fervidumComplete",
@@ -583,23 +587,48 @@ const finishFervidumExit = () => {
 };
 
 const startGridRestore = () => {
-  const { width, height } = getSweepViewportSize();
+  const { width, height } = getBackgroundViewportSize();
 
-  cancelAnimationFrame(sweepFrame);
+  cancelAnimationFrame(backgroundFrame);
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
-  sweepCanvas.classList.remove("is-fading");
-  sweepCanvas.classList.add("is-restoring");
-  cancelGridRewrite = window.gridPaper.writeOnCanvas(sweepCanvas, sweepContext, {
+  backgroundCanvas.classList.remove("is-fading");
+  backgroundCanvas.classList.add("is-active", "is-restoring");
+  cancelGridRewrite = window.gridPaper.writeOnCanvas(backgroundCanvas, backgroundContext, {
     width,
     height,
     scrollX: 0,
     scrollY: 0,
     onComplete: () => {
-      sweepCanvas.classList.add("is-fading");
-      restoreFadeTimer = window.setTimeout(finishFervidumExit, restoreFadeDuration);
+      backgroundCanvas.classList.add("is-fading");
+      restoreFadeTimer = window.setTimeout(finishBackgroundTransition, restoreFadeDuration);
     }
   });
+};
+
+const restoreGridFromColor = (backgroundColor) => {
+  createBackgroundCanvas();
+  resizeBackgroundCanvas();
+
+  const { width, height } = getBackgroundViewportSize();
+
+  backgroundContext.clearRect(0, 0, width, height);
+  backgroundContext.globalAlpha = 1;
+  backgroundContext.filter = "none";
+  backgroundContext.fillStyle = backgroundColor;
+  backgroundContext.fillRect(0, 0, width, height);
+  startGridRestore();
+};
+
+const cancelGridRestore = () => {
+  if (backgroundCanvas) {
+    finishBackgroundTransition();
+  }
+};
+
+window.siteBackgroundEffects = {
+  cancelGridRestore,
+  restoreGridFromColor
 };
 
 const waveVertexShader = `
@@ -925,7 +954,7 @@ const fadeOutWave = () => {
 };
 
 const createWaveLayers = () => {
-  const images = document.querySelectorAll(".gallery img");
+  const images = document.querySelectorAll(".fervidumTile .fervidum");
 
   const createWaveLayer = (image, imageIndex) => {
     const textureImage = window.fervidumLocalTexture || image;
@@ -1003,7 +1032,7 @@ const createWaveLayers = () => {
 const startFervidum = (includeSweep = true) => {
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
-  sweepCanvas.classList.remove("is-active", "is-restoring", "is-fading");
+  backgroundCanvas.classList.remove("is-active", "is-restoring", "is-fading");
 
   document.body.classList.remove(
     "fervidumActive",
@@ -1018,10 +1047,10 @@ const startFervidum = (includeSweep = true) => {
   document.body.classList.add("fervidumActive");
 
   if (includeSweep) {
-    startSweep();
+    startFervidumSweep();
   } else {
-    cancelAnimationFrame(sweepFrame);
-    sweepContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    cancelAnimationFrame(backgroundFrame);
+    backgroundContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
   }
 };
 
@@ -1037,7 +1066,7 @@ const resetFervidum = () => {
 };
 
 const initializeHoverEffects = () => {
-  createSweep();
+  createBackgroundCanvas();
 
   if (hoverCanvasEnabled) {
     createWaveLayers();
@@ -1091,7 +1120,7 @@ const initializeTouchEffects = () => {
     }
 
     // One capped-resolution canvas re-renders the source image; no cloned images or extra image layers.
-    createSweep();
+    createBackgroundCanvas();
     createWaveLayers();
     effectsReady = true;
   };

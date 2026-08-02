@@ -214,7 +214,7 @@ const createHarness = ({ webgl }) => {
       scrollHeight: 1200
     },
     querySelectorAll(selector) {
-      if (selector === ".fervidumTile" || selector === ".gallery img") {
+      if (selector === ".fervidumTile" || selector === ".fervidumTile .fervidum") {
         return [selector === ".fervidumTile" ? tile : image];
       }
 
@@ -341,7 +341,7 @@ test("touch keeps the background transition running when WebGL is unavailable", 
   harness.image.emit("click");
   harness.runFrames(3500);
 
-  const sweep = harness.canvases.find((canvas) => canvas.className === "fervidumSweep");
+  const sweep = harness.canvases.find((canvas) => canvas.className === "backgroundCanvas");
 
   assert.ok(sweep.classList.contains("is-active"));
   assert.ok(harness.body.classList.contains("fervidumActive"));
@@ -355,7 +355,7 @@ test("touch starts both the background transition and a rendered WebGL haze", ()
   harness.image.emit("click");
   harness.runFrames(3500);
 
-  const sweep = harness.canvases.find((canvas) => canvas.className === "fervidumSweep");
+  const sweep = harness.canvases.find((canvas) => canvas.className === "backgroundCanvas");
   const wave = harness.canvases.find((canvas) => canvas.className === "fervidumWave");
 
   assert.ok(sweep.classList.contains("is-active"));
@@ -378,7 +378,7 @@ test("a touch pointer event is not restarted by its follow-up click and survives
   harness.runLoad();
   harness.image.emit("pointerup", { pointerType: "touch" });
 
-  const sweep = harness.canvases.find((canvas) => canvas.className === "fervidumSweep");
+  const sweep = harness.canvases.find((canvas) => canvas.className === "backgroundCanvas");
   const startsAfterPointerUp = sweep.context2d.fills.length;
   harness.image.emit("click");
   harness.window.scrollY = 420;
@@ -395,7 +395,7 @@ test("the touch sweep repaints to cover a viewport that expands while scrolling"
   harness.image.emit("click");
   harness.runFrames(5000);
 
-  const sweep = harness.canvases.find((canvas) => canvas.className === "fervidumSweep");
+  const sweep = harness.canvases.find((canvas) => canvas.className === "backgroundCanvas");
   harness.window.innerHeight = 922;
   harness.window.visualViewport.height = 922;
   harness.runVisualViewport("scroll");
@@ -414,6 +414,36 @@ test("the active haze displays one image surface at a time", () => {
   assert.doesNotMatch(styles, /\.fervidumWave\s*\{[^}]*transition\s*:/s);
 });
 
+test("the heat haze only wraps fervidum images", () => {
+  assert.match(
+    script,
+    /document\.querySelectorAll\("\.fervidumTile \.fervidum"\)/
+  );
+  assert.doesNotMatch(script, /document\.querySelectorAll\("\.gallery img"\)/);
+});
+
+test("the shared background restore starts the same visible grid animation", () => {
+  const harness = createHarness({ webgl: false });
+  harness.window.siteBackgroundEffects.restoreGridFromColor("#ffffff");
+
+  const sweep = harness.canvases.find((canvas) => canvas.className === "backgroundCanvas");
+
+  assert.ok(sweep.classList.contains("is-active"));
+  assert.ok(sweep.classList.contains("is-restoring"));
+  assert.equal(harness.gridWrites.length, 1);
+});
+
+test("the background restore is immediately opaque before it fades out", () => {
+  assert.match(
+    styles,
+    /\.backgroundCanvas\.is-restoring\s*\{[^}]*transition\s*:\s*none/s
+  );
+  assert.match(
+    styles,
+    /\.backgroundCanvas\.is-restoring\.is-fading\s*\{[^}]*transition\s*:\s*opacity\s+460ms\s+ease-in-out/s
+  );
+});
+
 test("the heat haze canvas is opaque and has no CSS frame", () => {
   assert.match(script, /alpha: false,/);
   assert.match(script, /vec2 distortedUv = v_uv \+ offset;/);
@@ -424,11 +454,11 @@ test("the heat haze canvas is opaque and has no CSS frame", () => {
 });
 
 test("the sweep uses a dynamic viewport and leaves sizing to CSS", () => {
-  assert.match(styles, /\.fervidumSweep\s*\{[^}]*height\s*:\s*100dvh/s);
-  assert.doesNotMatch(script, /sweepCanvas\.style\.(?:width|height)\s*=/);
+  assert.match(styles, /\.backgroundCanvas\s*\{[^}]*height\s*:\s*100dvh/s);
+  assert.doesNotMatch(script, /backgroundCanvas\.style\.(?:width|height)\s*=/);
   assert.match(
     script,
-    /const getSweepViewportSize = \(\) => \(\{\s*width: window\.innerWidth,\s*height: window\.innerHeight\s*\}\);/s
+    /const getBackgroundViewportSize = \(\) => \(\{\s*width: window\.innerWidth,\s*height: window\.innerHeight\s*\}\);/s
   );
   assert.match(pageStyles, /background-attachment\s*:\s*fixed;/);
 });
@@ -438,7 +468,7 @@ test("desktop animates its canvas while its background animation remains active"
   assert.match(script, /const hoverWaveEnabled = true;/);
   assert.match(script, /const startWave = \(animate = true\) => \{/);
   assert.match(script, /if \(!animate\) \{\s*\n\s*return true;/s);
-  assert.match(script, /const initializeHoverEffects = \(\) => \{\s*createSweep\(\);\s*\n\s*if \(hoverCanvasEnabled\) \{\s*\n\s*createWaveLayers\(\);/s);
+  assert.match(script, /const initializeHoverEffects = \(\) => \{\s*createBackgroundCanvas\(\);\s*\n\s*if \(hoverCanvasEnabled\) \{\s*\n\s*createWaveLayers\(\);/s);
   assert.match(script, /if \(startWave\(hoverWaveEnabled\)\) \{/);
   assert.match(script, /if \(canUseHoverEffects\) \{\s*\n\s*initializeHoverEffects\(\);/s);
 });

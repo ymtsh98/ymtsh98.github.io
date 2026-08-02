@@ -14,7 +14,7 @@ body {
   background-color: transparent;
 }
 
-.fervidumSweep {
+.backgroundCanvas {
   position: fixed;
   inset: 0;
   z-index: 0;
@@ -26,17 +26,18 @@ body {
   transition: opacity 180ms linear;
 }
 
-.fervidumSweep.is-active {
-  opacity: 1;
-}
+  .backgroundCanvas.is-active {
+    opacity: 1;
+  }
 
-.fervidumSweep.is-restoring {
-  transition: opacity 460ms ease-in-out;
-}
+  .backgroundCanvas.is-restoring {
+    transition: none;
+  }
 
-.fervidumSweep.is-restoring.is-fading {
-  opacity: 0;
-}
+    .backgroundCanvas.is-restoring.is-fading {
+      opacity: 0;
+      transition: opacity 460ms ease-in-out;
+    }
 
 body.fervidumComplete {
   background-color: #f4f6f8;
