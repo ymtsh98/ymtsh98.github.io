@@ -241,7 +241,7 @@
 .toolContent progress {
   width: 100%;
   height: 14px;
-  accent-color: var(--accent-ink);
+  accent-color: #4e6f95;
 }
 
 .toolContent #status {
