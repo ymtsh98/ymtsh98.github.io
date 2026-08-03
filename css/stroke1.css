@@ -28,6 +28,14 @@ body.stroke1Active {
     animation: stroke1WhiteFlash 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  body.stroke1Active.stroke1Fading::before {
+    animation: stroke1WhiteFadeOut 460ms ease-in-out both;
+  }
+
+  body.stroke1Active.stroke1Fading::after {
+    animation: stroke1WhiteFlashFadeOut 460ms ease-in-out both;
+  }
+
 @keyframes stroke1WhiteFlash {
   0% {
     opacity: 0;
@@ -79,5 +87,29 @@ body.stroke1Active {
   100% {
     opacity: 1;
     transform: scaleY(1);
+  }
+}
+
+@keyframes stroke1WhiteFadeOut {
+  from {
+    opacity: var(--stroke1-fade-opacity, 1);
+    transform: var(--stroke1-fade-transform, scaleY(1));
+  }
+
+  to {
+    opacity: 0;
+    transform: var(--stroke1-fade-transform, scaleY(1));
+  }
+}
+
+@keyframes stroke1WhiteFlashFadeOut {
+  from {
+    opacity: var(--stroke1-flash-fade-opacity, 0);
+    transform: var(--stroke1-flash-fade-transform, translate(-50%, -50%) scaleX(0));
+  }
+
+  to {
+    opacity: 0;
+    transform: var(--stroke1-flash-fade-transform, translate(-50%, -50%) scaleX(0));
   }
 }

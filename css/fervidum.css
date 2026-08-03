@@ -39,6 +39,11 @@ body {
       transition: opacity 460ms ease-in-out;
     }
 
+  .backgroundCanvas.is-effect-fading {
+    opacity: 0;
+    transition: opacity 460ms ease-in-out;
+  }
+
 body.fervidumComplete {
   background-color: #f4f6f8;
 }

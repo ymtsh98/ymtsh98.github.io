@@ -301,7 +301,7 @@ const startFervidumSweep = () => {
   backgroundResizeFrame = undefined;
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
-  backgroundCanvas.classList.remove("is-restoring", "is-fading");
+  backgroundCanvas.classList.remove("is-restoring", "is-fading", "is-effect-fading");
 
   fervidumSweepStartTime = performance.now();
   fervidumSweepProgress = 0;
@@ -341,7 +341,7 @@ const finishBackgroundTransition = () => {
   cancelGridRewrite?.();
   cancelGridRewrite = undefined;
   clearTimeout(restoreFadeTimer);
-  backgroundCanvas.classList.remove("is-active", "is-restoring", "is-fading");
+  backgroundCanvas.classList.remove("is-active", "is-restoring", "is-fading", "is-effect-fading");
   backgroundContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
   document.body.classList.remove(
     "fervidumActive",
@@ -358,7 +358,7 @@ const startGridRestore = () => {
   cancelAnimationFrame(backgroundFrame);
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
-  backgroundCanvas.classList.remove("is-fading");
+  backgroundCanvas.classList.remove("is-fading", "is-effect-fading");
   backgroundCanvas.classList.add("is-active", "is-restoring");
   cancelGridRewrite = window.gridPaper.writeOnCanvas(backgroundCanvas, backgroundContext, {
     width,
@@ -386,15 +386,44 @@ const restoreGridFromColor = (backgroundColor) => {
   startGridRestore();
 };
 
+const restoreGridFromTransparent = () => {
+  createBackgroundCanvas();
+  resizeBackgroundCanvas();
+  backgroundContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  startGridRestore();
+};
+
 const cancelGridRestore = () => {
   if (backgroundCanvas) {
     finishBackgroundTransition();
   }
 };
 
+const fadeOutEffect = () => {
+  if (
+    !backgroundCanvas ||
+    !backgroundCanvas.classList.contains("is-active") ||
+    backgroundCanvas.classList.contains("is-restoring") ||
+    backgroundCanvas.classList.contains("is-effect-fading")
+  ) {
+    return;
+  }
+
+  cancelAnimationFrame(backgroundFrame);
+  cancelGridRewrite?.();
+  cancelGridRewrite = undefined;
+  clearTimeout(restoreFadeTimer);
+  fadeOutWave();
+  backgroundCanvas.classList.remove("is-restoring", "is-fading");
+  backgroundCanvas.classList.add("is-effect-fading");
+  restoreFadeTimer = window.setTimeout(finishBackgroundTransition, restoreFadeDuration);
+};
+
 window.siteBackgroundEffects = {
   cancelGridRestore,
-  restoreGridFromColor
+  fadeOutEffect,
+  restoreGridFromColor,
+  restoreGridFromTransparent
 };
 
 const waveVertexShader = `
@@ -796,9 +825,10 @@ const createWaveLayers = () => {
 };
 
 const startFervidum = (includeSweep = true) => {
+  window.galleryEffects?.activate("fervidum");
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
-  backgroundCanvas.classList.remove("is-active", "is-restoring", "is-fading");
+  backgroundCanvas.classList.remove("is-active", "is-restoring", "is-fading", "is-effect-fading");
 
   document.body.classList.remove(
     "fervidumActive",
@@ -861,7 +891,7 @@ const initializeHoverEffects = () => {
       }, duration);
     });
 
-    tile.addEventListener("mouseleave", () => {
+    tile.addEventListener("mouseleave", (event) => {
       clearTimeout(completeTimer);
       clearTimeout(warpTimer);
 
@@ -870,7 +900,11 @@ const initializeHoverEffects = () => {
         stopWave();
       }
 
-      resetFervidum();
+      if (event.relatedTarget?.closest?.(".gallery > .tile")) {
+        fadeOutEffect();
+      } else {
+        resetFervidum();
+      }
     });
   });
 };
@@ -904,6 +938,13 @@ const initializeTouchEffects = () => {
     // WebGL is optional; the requested background-color transition must always complete.
     effectActive = true;
   };
+
+  document.addEventListener("gallery:effectactivate", (event) => {
+    if (event.detail?.effect !== "fervidum") {
+      fadeOutEffect();
+      effectActive = false;
+    }
+  });
 
   fervidumTiles.forEach((tile) => {
     const image = tile.querySelector(".image");

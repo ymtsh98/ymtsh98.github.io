@@ -433,6 +433,28 @@ test("the shared background restore starts the same visible grid animation", () 
   assert.equal(harness.gridWrites.length, 1);
 });
 
+test("the transparent grid restore keeps the outgoing stroke effect visible", () => {
+  const harness = createHarness({ webgl: false });
+  harness.window.siteBackgroundEffects.restoreGridFromTransparent();
+
+  const sweep = harness.canvases.find((canvas) => canvas.className === "backgroundCanvas");
+
+  assert.equal(sweep.context2d.fills.length, 0);
+  assert.equal(harness.gridWrites.length, 1);
+});
+
+test("switching to another gallery effect fades fervidum without drawing the grid", () => {
+  const harness = createHarness({ webgl: false });
+  harness.runLoad();
+  harness.image.emit("click");
+
+  const sweep = harness.canvases.find((canvas) => canvas.className === "backgroundCanvas");
+  harness.window.siteBackgroundEffects.fadeOutEffect();
+
+  assert.ok(sweep.classList.contains("is-effect-fading"));
+  assert.equal(harness.gridWrites.length, 0);
+});
+
 test("the background restore is immediately opaque before it fades out", () => {
   assert.match(
     styles,
@@ -441,6 +463,10 @@ test("the background restore is immediately opaque before it fades out", () => {
   assert.match(
     styles,
     /\.backgroundCanvas\.is-restoring\.is-fading\s*\{[^}]*transition\s*:\s*opacity\s+460ms\s+ease-in-out/s
+  );
+  assert.match(
+    styles,
+    /\.backgroundCanvas\.is-effect-fading\s*\{[^}]*transition\s*:\s*opacity\s+460ms\s+ease-in-out/s
   );
 });
 
