@@ -323,6 +323,28 @@ body {
   font-family: "Klee One", "Yu Kyokasho", "Yu Gothic UI", "Hiragino Sans", system-ui, sans-serif;
 }
 
+/* The original CSS borders remain as a fallback until the pen-drawn strokes are ready. */
+.handDrawnFrames {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  pointer-events: none;
+  transition: opacity 160ms linear;
+}
+
+body.handDrawnFramesReady .profileLinks a::before,
+body.handDrawnFramesReady .profileLinks button::before,
+body.handDrawnFramesReady .blogLinks::before,
+body.handDrawnFramesReady .tile::before,
+body.handDrawnFramesReady .siteFooter::before,
+body.handDrawnFramesReady .contentFrame::before {
+  opacity: 0;
+}
+
 a {
   text-decoration: none;
 }

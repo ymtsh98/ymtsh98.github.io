@@ -228,14 +228,53 @@
     return furthestCandidate;
   };
 
-  const getTwoBendPath = (start, end, axis) => {
+  const getTwoBendPoints = (start, end, axis) => {
     if (axis === "horizontal") {
       const bendX = (start.x + end.x) / 2;
-      return `M ${start.x} ${start.y} L ${bendX} ${start.y} L ${bendX} ${end.y} L ${end.x} ${end.y}`;
+      return [
+        start,
+        { x: bendX, y: start.y },
+        { x: bendX, y: end.y },
+        end
+      ];
     }
 
     const bendY = (start.y + end.y) / 2;
-    return `M ${start.x} ${start.y} L ${start.x} ${bendY} L ${end.x} ${bendY} L ${end.x} ${end.y}`;
+    return [
+      start,
+      { x: start.x, y: bendY },
+      { x: end.x, y: bendY },
+      end
+    ];
+  };
+
+  // Each connection is a single path: no overpainted segments means no ink pools along the route.
+  const getHandDrawnPath = (points, seed) => {
+    const commands = [`M ${points[0].x} ${points[0].y}`];
+
+    points.slice(1).forEach((to, edge) => {
+      const from = points[edge];
+      const horizontal = Math.abs(to.y - from.y) < 0.01;
+      const length = horizontal ? Math.abs(to.x - from.x) : Math.abs(to.y - from.y);
+      const direction = horizontal ? Math.sign(to.x - from.x) : Math.sign(to.y - from.y);
+
+      for (let distance = 12; distance < length; distance += 12) {
+        const taper = Math.sin(Math.PI * distance / length);
+        const wobble = taper * (
+          Math.sin(distance * 0.052 + seed * 0.91 + edge * 2.13) * 0.42
+          + Math.sin(distance * 0.119 - seed * 0.47 + edge * 0.71) * 0.12
+        );
+        const point = horizontal
+          ? { x: from.x + direction * distance, y: from.y + wobble }
+          : { x: from.x + wobble, y: from.y + direction * distance };
+
+        commands.push(`L ${point.x} ${point.y}`);
+      }
+
+      commands.push(`L ${to.x} ${to.y}`);
+    });
+
+    return commands.join(" ");
   };
 
   const getEdges = (hosts) => {
@@ -278,9 +317,10 @@
     const { width, height } = getLayerSize();
     const hosts = getHosts();
     const minimumEndpointOffset = getMinimumEndpointOffset();
-    const ink = getComputedStyle(document.documentElement)
-      .getPropertyValue("--connector")
-      .trim() || "#4e5f72";
+    const styles = getComputedStyle(document.documentElement);
+    const ink = styles.getPropertyValue("--link-ink").trim()
+      || styles.getPropertyValue("--connector").trim()
+      || "#263f56";
     const paths = document.createDocumentFragment();
 
     connectionLayer.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -301,12 +341,16 @@
       );
       const path = document.createElementNS(svgNamespace, "path");
 
-      path.setAttribute("d", getTwoBendPath(start, end, axis));
+      path.setAttribute("d", getHandDrawnPath(
+        getTwoBendPoints(start, end, axis),
+        (from + 1) * 37 + (to + 1) * 19
+      ));
       path.setAttribute("fill", "none");
       path.setAttribute("stroke", ink);
-      path.setAttribute("stroke-linecap", "round");
-      path.setAttribute("stroke-width", "2");
-      path.setAttribute("opacity", "0.84");
+      path.setAttribute("stroke-linecap", "square");
+      path.setAttribute("stroke-linejoin", "miter");
+      path.setAttribute("stroke-width", "1.7");
+      path.setAttribute("opacity", "0.82");
       paths.appendChild(path);
     });
 
