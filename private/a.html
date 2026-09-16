@@ -12,8 +12,20 @@
     html, body { margin: 0; min-height: 100%; }
     body { display: grid; place-items: center; min-height: 100dvh; padding: 24px 16px 96px; color: #1f2d3d; background-color: #f4f6f8; background-image: linear-gradient(rgba(106, 137, 171, 0.14) 1px, transparent 1px), linear-gradient(90deg, rgba(106, 137, 171, 0.14) 1px, transparent 1px); background-size: 32px 32px; background-attachment: fixed; font-family: system-ui, sans-serif; }
     main { width: min(860px, 100%, calc((100dvh - 184px) * 91 / 55)); text-align: center; }
-    button { position: relative; display: block; width: 100%; aspect-ratio: 91 / 55; padding: 0; border: 0; background: transparent; cursor: pointer; touch-action: manipulation; }
+    button { position: relative; display: block; width: 100%; aspect-ratio: 91 / 55; padding: 0; border: 0; background: transparent; cursor: pointer; touch-action: manipulation; perspective: 1400px; }
     button:focus-visible { outline: 2px solid #4e5f72; outline-offset: 6px; }
+    .lift, .sheet { position: relative; display: block; width: 100%; height: 100%; transform-style: preserve-3d; }
+    .sheet { transition: transform 820ms cubic-bezier(.22,.72,.16,1); }
+    .flipped .sheet { transform: rotateY(180deg); }
+    .face { position: absolute; inset: 0; display: block; background: #f4f6f8; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 3px; box-shadow: 0 16px 32px -18px rgba(10,20,30,.45), 0 2px 5px rgba(10,20,30,.1); overflow: hidden; }
+    .front { transform: translateZ(.4px); }
+    .back { transform: rotateY(180deg) translateZ(.4px); }
+    .face::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(110deg, transparent 20%, rgba(255,255,255,.42) 48%, transparent 76%); opacity: 0; transform: translateX(-100%); }
+    .moving .face::after { animation: sheen 820ms ease-out; }
+    .moving .lift { animation: lift 820ms cubic-bezier(.22,.72,.16,1); }
+    @keyframes lift { 0%,100% { transform: translateY(0) rotateZ(0); } 42% { transform: translateY(-12px) rotateZ(-1deg); } }
+    @keyframes sheen { 0%,100% { opacity: 0; } 40% { opacity: .65; } 100% { transform: translateX(100%); } }
+    @media (prefers-reduced-motion: reduce) { .sheet { transition-duration: 1ms; } .moving .lift, .moving .face::after { animation: none; } }
     img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
     #hint { margin: 16px 0 0; color: #3c4a58; font-size: 13px; }
     footer { position: fixed; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); left: 16px; color: #3c4a58; font-size: 12px; line-height: 1.6; text-align: center; }
@@ -25,8 +37,12 @@
   <p id="status">A valid access link is required.</p>
   <main id="viewer" hidden>
     <button id="flip" type="button" aria-label="Show back" aria-describedby="hint">
-      <img id="front" alt="Front" draggable="false">
-      <img id="back" alt="Back" draggable="false" hidden>
+      <span class="lift">
+        <span class="sheet">
+          <span class="face front"><img id="front" alt="Front" draggable="false"></span>
+          <span class="face back"><img id="back" alt="Back" draggable="false" aria-hidden="true"></span>
+        </span>
+      </span>
     </button>
     <p id="hint" aria-live="polite">1 / 2 · Tap to flip</p>
   </main>
@@ -49,11 +65,17 @@
         await images[index].decode();
       }
       let side = 0;
+      let busy = false;
       const flip = document.getElementById('flip');
       flip.addEventListener('click', () => {
+        if (busy) return;
+        busy = true;
         side = 1 - side;
-        images[0].hidden = side === 1;
-        images[1].hidden = side === 0;
+        flip.classList.toggle('flipped', side === 1);
+        flip.classList.add('moving');
+        images[0].setAttribute('aria-hidden', String(side === 1));
+        images[1].setAttribute('aria-hidden', String(side === 0));
+        setTimeout(() => { flip.classList.remove('moving'); busy = false; }, 830);
         flip.setAttribute('aria-label', side === 0 ? 'Show back' : 'Show front');
         document.getElementById('hint').textContent = (side + 1) + ' / 2 · Tap to flip';
       });
