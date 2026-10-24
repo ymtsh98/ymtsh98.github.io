@@ -7,6 +7,8 @@ const handDrawnFrames = (() => {
     return undefined;
   }
 
+  const animations = new WeakMap();
+
   const getCssValue = (name, fallback) => (
     getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
   );
@@ -24,11 +26,11 @@ const handDrawnFrames = (() => {
     + Math.sin(position * 0.014 - frame * 1.27) * 0.05
   );
 
-  const drawEdge = ({ from, to, frame, edge, color, weight = 1, startTrim = 0, endTrim = 0 }) => {
+  const drawEdge = ({ from, to, frame, edge, color, weight = 1, startTrim = 0, endTrim = 0, maxLength = Infinity }) => {
     const horizontal = Math.abs(to.y - from.y) < 0.01;
     const length = horizontal ? Math.abs(to.x - from.x) : Math.abs(to.y - from.y);
     const direction = horizontal ? Math.sign(to.x - from.x) : Math.sign(to.y - from.y);
-    const drawingEnd = Math.max(startTrim, length - endTrim);
+    const drawingEnd = Math.min(Math.max(startTrim, length - endTrim), maxLength);
     let start = startTrim;
     let segment = 0;
 
@@ -91,7 +93,7 @@ const handDrawnFrames = (() => {
     return undefined;
   };
 
-  const drawFrame = (element, frame, color) => {
+  const drawFrame = (element, frame, color, progress = 1) => {
     const rect = element.getBoundingClientRect();
     const inset = 2;
     const left = rect.left + inset;
@@ -115,10 +117,14 @@ const handDrawnFrames = (() => {
     const emphasizedEdge = getEmphasizedEdge(element);
     const getWeight = (edge) => edge === emphasizedEdge ? 3.0 : 1;
 
-    drawEdge({ from: { x: left, y: top }, to: { x: right, y: top }, frame, edge: 0, color, weight: getWeight(0), startTrim: topLeftGap, endTrim: topRightGap });
-    drawEdge({ from: { x: right, y: top }, to: { x: right, y: bottom }, frame, edge: 1, color, weight: getWeight(1), startTrim: topRightGap, endTrim: bottomRightGap });
-    drawEdge({ from: { x: right, y: bottom }, to: { x: left, y: bottom }, frame, edge: 2, color, weight: getWeight(2), startTrim: bottomRightGap, endTrim: bottomLeftGap });
-    drawEdge({ from: { x: left, y: bottom }, to: { x: left, y: top }, frame, edge: 3, color, weight: getWeight(3), startTrim: bottomLeftGap, endTrim: topLeftGap });
+    const width = right - left;
+    const height = bottom - top;
+    const length = progress * 2 * (width + height);
+
+    drawEdge({ from: { x: left, y: top }, to: { x: right, y: top }, frame, edge: 0, color, weight: getWeight(0), startTrim: topLeftGap, endTrim: topRightGap, maxLength: length });
+    drawEdge({ from: { x: right, y: top }, to: { x: right, y: bottom }, frame, edge: 1, color, weight: getWeight(1), startTrim: topRightGap, endTrim: bottomRightGap, maxLength: length - width });
+    drawEdge({ from: { x: right, y: bottom }, to: { x: left, y: bottom }, frame, edge: 2, color, weight: getWeight(2), startTrim: bottomRightGap, endTrim: bottomLeftGap, maxLength: length - width - height });
+    drawEdge({ from: { x: left, y: bottom }, to: { x: left, y: top }, frame, edge: 3, color, weight: getWeight(3), startTrim: bottomLeftGap, endTrim: topLeftGap, maxLength: length - 2 * width - height });
   };
 
   const render = () => {
@@ -134,11 +140,46 @@ const handDrawnFrames = (() => {
     context.lineCap = "butt";
     context.lineJoin = "miter";
 
+    const canvasZ = Number(getComputedStyle(canvas).zIndex) || 0;
+    const surfaces = Array.from(document.querySelectorAll("[data-frame-surface]")).map(element => {
+      const style = getComputedStyle(element);
+      return { element, rect: element.getBoundingClientRect(), style, z: Number(style.zIndex) || 0 };
+    });
+    let animating = false;
+    const now = performance.now();
     Array.from(document.querySelectorAll(targetSelector)).forEach((element, frame) => {
-      drawFrame(element, frame, color);
+      const style = getComputedStyle(element);
+      if (style.visibility === "hidden" || element.closest("[inert], [data-frame-paused]")) return;
+      const start = animations.get(element);
+      const progress = start === undefined ? 1 : Math.min(1, (now - start) / 420);
+      if (progress < 1) animating = true;
+      else animations.delete(element);
+      const surfaceIndex = surfaces.findIndex(surface => surface.element.contains(element));
+      context.save();
+      {
+        const owner = surfaces[surfaceIndex];
+        surfaces.forEach((surface, index) => {
+          if (surface === owner || surface.z > canvasZ || surface.style.visibility === "hidden"
+              || (owner && (surface.z < owner.z || (surface.z === owner.z && index < surfaceIndex)))) return;
+          const rect = surface.rect;
+          const exclusion = new Path2D();
+          exclusion.rect(0, 0, width, height);
+          if (surface.style.clipPath.startsWith("polygon(")) {
+            const points = surface.style.clipPath.slice(8, -1).split(",").map(point => point.trim().split(/\s+/).map(parseFloat));
+            points.forEach(([x, y], i) => i ? exclusion.lineTo(rect.left + x, rect.top + y) : exclusion.moveTo(rect.left + x, rect.top + y));
+            exclusion.closePath();
+          } else {
+            exclusion.rect(rect.left, rect.top, rect.width, rect.height);
+          }
+          context.clip(exclusion, "evenodd");
+        });
+      }
+      drawFrame(element, frame, style.getPropertyValue("--frame-ink").trim() || color, progress);
+      context.restore();
     });
 
     context.globalAlpha = 1;
+    if (animating) scheduleRender();
   };
 
   let renderFrame;
@@ -162,10 +203,24 @@ const handDrawnFrames = (() => {
   new MutationObserver(scheduleRender).observe(document.body, {
     attributes: true,
     subtree: true,
-    attributeFilter: ["class", "hidden", "style"]
+    attributeFilter: ["class", "hidden", "style", "data-frame-paused"]
   });
 
-  return { render: scheduleRender };
+  const pause = root => {
+    root.setAttribute("data-frame-paused", "");
+    root.querySelectorAll(targetSelector).forEach(element => animations.delete(element));
+    scheduleRender();
+  };
+  const animate = root => {
+    root.removeAttribute("data-frame-paused");
+    const now = performance.now();
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      root.querySelectorAll(targetSelector).forEach(element => animations.set(element, now));
+    }
+    scheduleRender();
+  };
+
+  return { render: scheduleRender, pause, animate };
 })();
 
 window.handDrawnFrames = handDrawnFrames;

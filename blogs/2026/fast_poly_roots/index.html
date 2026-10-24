@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>三次方程式の実根を求めるには、解析解よりもニュートン法＋Bisection Searchの方が速い...のか？ | なんかそんな感じで</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../../css/style.css?v=20260803-ballpoint-frames-3">
+  <script>
+    document.documentElement.classList.add("fontsPending");
+    document.addEventListener("DOMContentLoaded", () => {
+      document.fonts.ready.then(() => {
+        document.documentElement.classList.remove("fontsPending");
+        window.handDrawnFrames?.render();
+      });
+    }, { once: true });
+  </script>
+  <style>
+    html { overflow-anchor: none; }
+    html.fontsPending body { visibility: hidden; }
+    main, .siteFooter {
+      width: calc(100% - 2 * clamp(10px, 2vw, 20px));
+      max-width: 60rem;
+      margin-left: clamp(10px, 2vw, 20px);
+      margin-right: clamp(10px, 2vw, 20px);
+    }
+    main { padding: clamp(10px, 2vw, 20px) 0; }
+    .siteFooter { margin-top: 0; }
+    #solverForm { max-width: 820px; }
+    #controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .formula { display: flex; flex-wrap: wrap; align-items: baseline; gap: clamp(3px, 0.6vw, 6px); margin: 24px 0 14px; font-size: clamp(14px, 2.2vw, 22px); }
+    .formula .term { display: inline-flex; align-items: baseline; gap: clamp(2px, 0.4vw, 4px); white-space: nowrap; }
+    .formula input { field-sizing: fixed; width: 8ch; min-width: 8ch; max-width: 8ch; padding: 2px 4px; border: 0; border-bottom: 1px solid #9daec1; border-radius: 0; background: #ffffff80; color: inherit; font: inherit; text-align: center; appearance: textfield; }
+    .formula input::-webkit-inner-spin-button, .formula input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+    .formula input:focus { outline: 2px solid #4e6f9540; border-bottom-color: #4e6f95; }
+    .solverActions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 0; margin-bottom: 16px; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; --frame-ink: #a34816; }
+    .buttons button { padding: clamp(6px, 0.9vw, 9px) clamp(9px, 1.4vw, 14px); border: 0; border-radius: 0; background: transparent; color: #a34816; font: inherit; font-size: clamp(11px, 1.3vw, 13px); font-weight: 500; cursor: pointer; }
+    .buttons button::before { border-color: #b9571d; }
+    .buttons button:hover { background: #ef9d5333; border-color: #a34816; }
+    .buttons button:active { background: #ef9d5355; }
+    .buttons button:focus-visible { outline: 2px solid #4e6f95; outline-offset: 3px; }
+    #controls:disabled { opacity: 0.5; }
+    @media (max-width: 480px) {
+      .solverActions { gap: 12px; }
+    }
+    #plot { display: block; touch-action: none; user-select: none; }
+    .graphNote { color: #242719; font-weight: 600; margin: 24px 0; padding: clamp(10px, 3vw, 32px); position: relative; z-index: 1; isolation: isolate; filter: drop-shadow(2px 4px 5px #30302026); }
+    .monotonicPlots { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px; margin: 24px 0; }
+    .monotonicPlots > .graphNote { flex: 0 1 360px; margin: 0; }
+    .formulaNote {
+      width: fit-content;
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    .formulaNote p { margin: 0; }
+    .formulaNote p + p { margin-top: 0.5em; }
+    .graphNote::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      background: linear-gradient(170deg, #fff9d9, #fff2b9);
+    }
+    .graphNote.noteWaiting { visibility: hidden; }
+    .graphNote.noteRevealing { visibility: visible; }
+    .handDrawnFrames { z-index: 3; }
+    .paperMotionLayer { position: fixed; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
+    .paperMotion { position: absolute; z-index: 3; visibility: visible; pointer-events: none; }
+    .graphNote { container-type: inline-size; }
+    .graphNote:not(.benchmarkNote) { width: 90%; max-width: 680px; padding: clamp(10px, 2vw, 20px); }
+    .graphNote.formulaNote {
+      container-type: normal;
+      width: fit-content;
+      max-width: 100%;
+      padding: clamp(5px, 1vw, 10px);
+    }
+    @media (max-width: 600px) {
+      .graphNote:not(.benchmarkNote) { width: 100%; }
+    }
+    .graphNote .formula { margin: 0; font-size: min(2.68cqw, 16px); gap: 0.73cqw; }
+    .graphNote .formula .term { gap: 0.49cqw; }
+    .graphNote .formula input { padding: 0.24cqw 0.49cqw; }
+    .graphNote .solverActions { margin-bottom: 1.5cqw; gap: 1.46cqw 2.44cqw; }
+    .graphNote .buttons { gap: 0.98cqw; }
+    .graphNote .buttons button { padding: 1.1cqw 1.7cqw; font-size: 1.59cqw; border-radius: 0; }
+    .graphNote #solverForm { max-width: none; }
+    #results { --row-height: 4.8cqw; height: calc(var(--row-height) * 4 + 2px); overflow-x: auto; overflow-y: hidden; margin-top: 1.5cqw; }
+    #results table { width: 100%; height: calc(var(--row-height) * 4); table-layout: fixed; border-collapse: collapse; font-size: min(1.95cqw, 16px); line-height: 1.3; font-variant-numeric: tabular-nums; }
+    #results th, #results td { height: var(--row-height); padding: 0.8cqw 1cqw; text-align: center; white-space: nowrap; border-bottom: 1px solid #8f80532b; }
+    #results th:first-child { width: 5%; padding-left: 0; padding-right: 0.5cqw; }
+    #results th { font-weight: 600; color: #303522; }
+    #results .loss { color: #842411; }
+    #results .pass { color: #254921; }
+    #message:empty { display: none; }
+    dd { margin-left: 0; overflow-wrap: anywhere; }
+    .resultSection { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; margin: 24px 0; }
+    .benchmarkNote { container-type: normal; flex: 0 1 auto; width: max-content; max-width: min(100%, 520px); margin: 0; padding: 1.4em; font-size: clamp(9px, 1.3vw, 13px); }
+    .benchmarkNote h2 { margin: 0 0 0.8em; font-size: 1.5em; }
+    .benchmarkNote table { width: auto; border-collapse: collapse; font-size: inherit; font-variant-numeric: tabular-nums; }
+    .benchmarkNote th, .benchmarkNote td { padding: 0.7em 0.5em; text-align: right; white-space: nowrap; border-bottom: 1px solid #8f80532b; }
+    .benchmarkNote tbody th, .benchmarkNote thead th:first-child { text-align: left; padding-left: 0; padding-right: 1em; }
+    .benchmarkNote th:last-child, .benchmarkNote td:last-child { padding-right: 0; }
+    .benchmarkNote .failure { color: #842411; }
+    .resultSection .articleText { flex: 1 1 24rem; min-width: 0; margin: 0; }
+    .resultSection .articleText p:first-child { margin-top: 0; }
+    @media (max-width: 400px) {
+      .benchmarkNote { font-size: 2.3vw; }
+    }
+    .articleText { line-height: 1.9; }
+
+    .expandableScope summary { cursor: pointer; }
+    pre { margin: 20px 0; padding: 16px; overflow-x: auto; tab-size: 2; background: rgba(0, 0, 0, 0.78); color: #edf0f4; }
+    pre code { display: block; font-family: Consolas, "Courier New", monospace; font-size: clamp(12px, 1.4vw, 15px); line-height: 1.65; white-space: pre; }
+    code .token.comment, code .token.prolog { color: #a8b8a7; font-style: italic; }
+    code .token.keyword, code .token.boolean { color: #d8a1ed; }
+    code .token.number { color: #f1b27b; }
+    code .token.string, code .token.char { color: #a9d59b; }
+    code .token.function { color: #91c9f5; }
+    code .token.class-name { color: #8ad4cf; }
+    code .token.operator, code .token.punctuation { color: #d0d5dc; }
+    code .token.directive, code .token.macro { color: #ebc18e; }
+    .noteGrip { position: absolute; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
+    .noteGrip[data-edge="top"], .noteGrip[data-edge="bottom"] { left: 0; width: 100%; height: 28px; }
+    .noteGrip[data-edge="left"], .noteGrip[data-edge="right"] { top: 0; width: 28px; height: 100%; }
+    .noteGrip:focus-visible { outline: 1px solid #a34816; outline-offset: -2px; }
+    .noteDragging, .noteDragging .noteGrip { cursor: grabbing; user-select: none; }
+    .graphNote.noteDragging { z-index: 4; transform-origin: top right; transform: perspective(1000px) rotateX(8deg) rotateY(-4deg) rotate(-2deg); filter: drop-shadow(8px 16px 12px #30302030); }
+    @media (prefers-reduced-motion: reduce) {
+      .graphNote.noteDragging { transform: none; }
+    }
+    .handle { cursor: grab; }
+    .handle:active { cursor: grabbing; }
+  </style>
+<script>
+  window.MathJax = {
+    output: {
+      displayAlign: 'left',
+      displayIndent: '1em',
+      linebreaks: {
+        inline: false
+      }
+    },
+    options: {
+      enableMenu: false,
+      enableSpeech: false,
+      enableBraille: false,
+      enableExplorer: false,
+      enableExplorerHelp: false,
+      menuOptions: {
+        settings: {
+          enrich: false,
+          speech: false,
+          braille: false,
+          inTabOrder: false
+        }
+      }
+    }
+  };
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+  <script src="../../../js/hand-drawn-frames.js?v=20260924-frame-ink" defer></script>
+  <script src="fast_poly_roots_wasm.js" defer></script>
+  <script src="graph.js" defer></script>
+  <script src="../../../js/prism-cpp.min.js" defer></script>
+</head>
+<body>
+  <canvas class="handDrawnFrames" aria-hidden="true"></canvas>
+  <main>
+    <a class="backLink" href="../../../">Home</a>
+    <h1>三次方程式の実根を求めるには、解析解よりもニュートン法＋Bisection Searchの方が速い...のか？</h1>
+
+    <div class="articleText">
+      <p>（前提）虚根のことは考えていない。</p>
+      <p>三次方程式 \(f(x)=ax^3+bx^2+cx+d\) の実根は、</p>
+      <section class="graphNote formulaNote" data-frame-surface aria-label="三次方程式の解析解">
+        <p>
+          \[
+          p=\frac{3ac-b^2}{3a^2},\qquad
+          q=\frac{2b^3-9abc+27a^2d}{27a^3},\qquad
+          D=\left(\frac q2\right)^2+\left(\frac p3\right)^3
+          \]
+        </p>
+        <p>
+          \[
+          x=
+          \begin{cases}
+          \displaystyle
+          \sqrt[3]{-\frac q2+\sqrt D}
+          +\sqrt[3]{-\frac q2-\sqrt D}
+          -\frac{b}{3a},
+          & D>0,
+          \\[1.2em]
+          \displaystyle
+          2\sqrt[3]{-\frac q2}-\frac{b}{3a},
+          \quad
+          -\sqrt[3]{-\frac q2}-\frac{b}{3a},
+          & D=0,
+          \\[1.2em]
+          \displaystyle
+          2\sqrt{-\frac p3}
+          \cos\left(
+          \frac13\operatorname{atan2}\left(
+          \sqrt{-D},
+          -\frac q2
+          \right)
+          -\frac{2\pi k}{3}
+          \right)
+          -\frac{b}{3a},
+          \quad k=0,1,2,
+          & D<0. \end{cases}
+                 \]
+        </p>
+      </section>
+      <p>
+        として求められる。
+        <br>
+        どう考えても重そうな見た目をしている、cubic rootとかatan2とか怖いな～という印象は生まれる。
+        cbrtは重そうだから避けたいなとか考えると、fast inverse square rootのような方法が思い起こされる。
+        ニュートン法で高速にsqrtを近似することで有名なため、ニュートン法が三次方程式の高速な計算にも使えそうという発想はできる。
+        しかしどうやら近似アプローチでなくても、Safeguarded Newtonで高速に計算する方法がある、みたいな話を聞いた。
+        個人的な納得を得るために実装しておく。
+        <section class="graphNote" data-frame-surface>
+          <form id="solverForm">
+            <fieldset id="controls" disabled>
+              <div class="solverActions">
+                <div class="buttons profileLinks"><button type="button" id="random">Random</button><button type="button" id="randomPrecision">Catastrophic Cancellation</button></div>
+              </div>
+              <div class="formula" aria-label="Cubic coefficients">
+                <span>f(x) =</span>
+                <span class="term"><input name="a" aria-label="a" type="number" value="1" step="any" required><span>x³</span></span>
+                <span class="term">+ <input name="b" aria-label="b" type="number" value="0" step="any" required><span>x²</span></span>
+                <span class="term">+ <input name="c" aria-label="c" type="number" value="-3" step="any" required><span>x</span></span>
+                <span class="term">+ <input name="d" aria-label="d" type="number" value="1" step="any" required></span>
+              </div>
+            </fieldset>
+          </form>
+          <p id="message" role="status" aria-live="polite"></p>
+          <div id="results" aria-live="polite"></div>
+          <svg id="plot" width="100%" viewBox="0 0 900 420" aria-label="Drag handles to edit the cubic"><title id="plotTitle">Polynomial and roots</title><desc id="plotDescription">Polynomial graph</desc></svg>
+        </section>
+        死ぬほどどうでもいいグラフ。
+      </p>
+      <hr>
+      <p>
+        三次方程式の求解とYukselの方法について触れる。<br />
+        Cem Yuksel, “High-Performance Polynomial Root Finding for Graphics,” Proc. ACM Comput. Graph. Interact. Tech., 5(3), Article 27, 2022.
+      </p>
+      <p>
+        とりあえず三次方程式の解析解のコードをまず書いておく。
+        こいつよりも速く動いてくれたら嬉しい、というモチベーション。
+        <pre><code class="language-cpp"><script type="text/plain">int solveCubicAnalytical(double a, double b, double c, double d, double* roots) {
+  // @return number of roots
+  if (a == 0) return solveQuadratic(b, c, d, roots);
+
+  double ba = b / a;
+  double b3a = ba / 3.0;
+  double ca = c / a;
+  double da = d / a;
+
+  double p = ca - ba * b3a;
+  double q = 2.0 * b3a * b3a * b3a - b3a * ca + da;
+
+  double tp = p / 3.0;
+  double hq = 0.5 * q;
+
+  double discriminant = hq * hq + tp * tp * tp;
+  if (discriminant > 0.0) {
+    double radical = std::sqrt(discriminant);
+    //// avoid catastrophic cancellation
+    // double u = std::cbrt(-hq + radical);
+    // double v = std::cbrt(-hq - radical);
+    double u = std::cbrt(-hq - std::copysign(radical, hq));
+    double v = -tp / u;
+    roots[0] = u + v - b3a;
+    return 1;
+  }
+
+  if (discriminant == 0.0) {
+    double u = std::cbrt(-hq);
+    roots[0] = 2.0 * u - b3a;
+    if (u == 0.0) return 1;
+
+    roots[1] = -u - b3a;
+    if (roots[0] > roots[1]) std::swap(roots[0], roots[1]);
+    return 2;
+  }
+
+  double r = std::sqrt(-tp);
+  double t = std::atan2(std::sqrt(-discriminant), -hq) / 3.0;
+  for (int k = 0; k < 3; ++k) roots[k] = 2.0 * r * std::cos(t - k * pi2over3) - b3a;
+
+  if (roots[0] > roots[1]) std::swap(roots[0], roots[1]);
+  if (roots[1] > roots[2]) std::swap(roots[1], roots[2]);
+  if (roots[0] > roots[1]) std::swap(roots[0], roots[1]);
+
+  return 3;
+}</script></code></pre>
+      </p>
+      <p>
+        Yukselの方法の基本的な気持ち・流れは次の雰囲気である。<br />
+        1. \(f(x)\) の停留点を \(x_a, x_b\) として求める <br />
+        2. 探索範囲を \(x_{min}, x_{max}\) とすると、 \([x_{min}, x_a], [x_a, x_b], [x_b, x_{max}]\) の3つの区間に分ける <br />
+        3. このとき各区間は単調であることを利用し、ある一つの解をニュートン法でゴリゴリ見つける、範囲外にはみ出した場合はbisection \(x_{next}=\frac{left+right}{2}\) に切り替えて探索を進める（Safeguarded Newton）<br />
+        4. 残りの解は元の式をdeflationして二次方程式にして解く<br />
+
+        \(x_{min}, x_{max}\) は任意の範囲でかつ、この後の分岐にも多数あらわれるが、特に指定がない限り無限区間（xmin=-inf, xmax=+inf）を想定する。
+        下記実装では、infの時にCauchy boundを利用している。
+        <pre><code class="language-cpp"><script type="text/plain">double evaluateCubic(double a, double b, double c, double d, double x) {
+  return ((a * x + b) * x + c) * x + d;
+}
+
+double safeguardedNewton(double a, double b, double c, double d, double left, double right, double last) {
+  double da = 3 * a;
+  double db = 2 * b;
+  double x = 0.5 * (left + right);
+
+  /*
+  for (int i = 0; i < CONSTANT_SIZE_ITERATIONS; ++i) {
+    // fast evaluation
+  }
+  */
+
+  while (true) {
+    double eval = evaluateCubic(a, b, c, d, x);
+    if (eval == 0.) return x;
+
+    if ((eval < 0.) == (last < 0.)) {
+      left = x;
+      last = eval;
+    } else {
+      right = x;
+    }
+
+    double next = x - eval / ((da * x + db) * x + c);
+
+    if (next <= left || next >= right) {
+      next = 0.5 * (left + right);
+      if (next == x) return x;
+    } else if (std::abs(next - x) <= tolerance) {
+      return next;
+    }
+
+    x = next;
+  }
+
+  return x;
+}
+
+int solveCubicYuksel(double a, double b, double c, double d, double xmin, double xmax, double* roots) {
+  if (a == 0) return solveQuadratic(b, c, d, roots);
+
+  if (xmin == -std::numeric_limits<double>::infinity() || xmax == std::numeric_limits<double>::infinity()) {
+    // Fujiwara bound
+    // double bound = std::abs(b / a);
+    // double value = std::abs(c / a);
+    // if (value > bound * bound) bound = std::sqrt(value);
+    // value = std::abs(d / a);
+    // if (value > bound * bound * bound) bound = std::cbrt(value);
+    // bound *= 2.;
+    // xmin = -bound;
+    // xmax = bound;
+
+    // Cauchy bound
+    double bound = 1.0 + std::max(std::max(std::abs(b), std::abs(c)), std::abs(d)) / std::abs(a);
+    xmin = std::max(xmin, -bound);
+    xmax = std::min(xmax, bound);
+  }
+
+  double critical[2] = {};
+  int n = solveQuadratic(3 * a, 2 * b, c, critical);
+  double xa = critical[0], xb = critical[1];
+  // ...
+}</script></code></pre>
+        Safeguarded Newtonの流れはシンプルで、evaluate結果がゼロもしくは1-stepの歩幅が十分小さくなったら終了、という感じである。
+        Bisectionの詰め方は、最後のleft sideとevalの符号が同じならleftを更新、そうでなければrightを更新、という感じである。
+        コメントアウト箇所にbisectionなしの定数回ニュートン法を使うとかで、ちょっとした高速化も考えられる（ペーパーではそれが書いてある）。
+        <br />
+        さて、Yuskelのペーパーを読んでいて「確かにな」となるポイントは、丁寧に区間を分けしてちゃんと計算を削ろうという点にある。
+        例えば \(f(x)\) が単調な区間を考えると、これは、停留点 n が n<=1 のとき、または二つの停留点が xmin, xmax の外側に位置するときである。
+        そして単調な区間ならば、実根は一つもしくは存在しないため、safeguarded Newtonを一回呼ぶことで処理が終了する。
+      </p>
+      <div class="monotonicPlots">
+        <section class="graphNote" data-frame-surface aria-label="停留点が1つの三次関数の固定例" style="position: relative; width: 360px; max-width: 100%; box-sizing: border-box; padding: 4px">
+          <p style="position: absolute; top: 8px; left: 24px; z-index: 1; margin: 0 0 4px; font-size: 95%">\(f(x)=x^3+1\)</p>
+          <svg width="100%" height="210" viewBox="176 10 616 365" role="img" aria-label="単調増加する三次関数と唯一の実根" aria-describedby="monotonicPlotDescription" style="display: block">
+            <desc id="monotonicPlotDescription">f(x)=x³+1 は実数全体で単調増加する。停留点 (0, 1) では傾きが0になり、x軸との交点は根 (-1, 0) の1つだけ。表示範囲は無限区間の一部。</desc>
+            <g fill="none" stroke="#8a9a9d">
+              <path d="M186 198H766 M476 28V368" />
+              <path d="M194 194l-8 4 8 4 M758 194l8 4-8 4 M472 36l4-8 4 8" />
+              <path d="M277 194V202 M675 194V202 M472 178H480" />
+            </g>
+            <path d="M78 338 C210.666667 178 343.333333 178 476 178 C608.666667 178 741.333333 178 874 18" fill="none" stroke="#276b7a" stroke-width="2.5" />
+            <path d="M421 178H531" fill="none" stroke="#276b7a" stroke-dasharray="5 5" />
+            <circle cx="277" cy="198" r="6" fill="#bf633e" stroke="#fffefa" stroke-width="2" />
+            <circle cx="476" cy="178" r="6" fill="#fffefa" stroke="#276b7a" stroke-width="2.5" />
+            <g fill="#344137" font-size="18">
+              <text x="277" y="228" text-anchor="middle">−1</text>
+              <text x="488" y="228">0</text>
+              <text x="675" y="228" text-anchor="middle">1</text>
+              <text x="458" y="174" text-anchor="end">1</text>
+              <text x="774" y="203">x</text>
+              <text x="488" y="36">f(x)</text>
+            </g>
+          </svg>
+        </section>
+        <section class="graphNote" data-frame-surface aria-label="2つの停留点の間に探索区間が完全に含まれる三次関数の固定例" style="position: relative; width: 360px; max-width: 100%; box-sizing: border-box; padding: 4px">
+          <p style="position: absolute; top: 8px; left: 24px; z-index: 1; margin: 0 0 4px; font-size: 95%">\(f(x)=x^3-3x\)</p>
+          <svg width="100%" height="210" viewBox="176 10 616 365" role="img" aria-label="停留点の間に含まれる単調減少の探索区間と唯一の実根" aria-describedby="containedMonotonicPlotDescription" style="display: block">
+            <desc id="containedMonotonicPlotDescription">f(x)=x³−3x の停留点は xₐ=−1、xᵦ=1。探索区間 [xmin, xmax]=[−0.6, 0.6] は2つの停留点の間に完全に含まれ、この区間では単調減少する。区間内の実根は x=0 の1つだけ。</desc>
+            <path d="M356.6 52H595.4V342H356.6Z" fill="#276b7a" fill-opacity="0.08" />
+            <g fill="none" stroke="#8a9a9d">
+              <path d="M186 198H766 M476 28V368" />
+              <path d="M194 194l-8 4 8 4 M758 194l8 4-8 4 M472 36l4-8 4 8" />
+              <path d="M277 194V202 M675 194V202" />
+            </g>
+            <path d="M356.6 52V342 M595.4 52V342" fill="none" stroke="#8a9a9d" stroke-dasharray="5 5" />
+            <path d="M78 318 C144.333333 138 210.666667 78 277 78 C343.333333 78 409.666667 138 476 198 C542.333333 258 608.666667 318 675 318 C741.333333 318 807.666667 258 874 78" fill="none" stroke="#276b7a" stroke-width="2.5" />
+            <circle cx="476" cy="198" r="6" fill="#bf633e" stroke="#fffefa" stroke-width="2" />
+            <g fill="#fffefa" stroke="#276b7a" stroke-width="2.5">
+              <circle cx="277" cy="78" r="6" />
+              <circle cx="675" cy="318" r="6" />
+            </g>
+            <g fill="#344137" font-size="18">
+              <text x="277" y="228" text-anchor="middle">−1</text>
+              <text x="488" y="228">0</text>
+              <text x="675" y="228" text-anchor="middle">1</text>
+              <text x="774" y="203">x</text>
+              <text x="488" y="36">f(x)</text>
+            </g>
+            <foreignObject x="306.6" y="342" width="100" height="32">
+              <div xmlns="http://www.w3.org/1999/xhtml" style="color: #344137; font-size: 18px; text-align: center">\(x_{min}\)</div>
+            </foreignObject>
+            <foreignObject x="545.4" y="342" width="100" height="32">
+              <div xmlns="http://www.w3.org/1999/xhtml" style="color: #344137; font-size: 18px; text-align: center">\(x_{max}\)</div>
+            </foreignObject>
+          </svg>
+        </section>
+      </div>
+      <p>
+        <pre><code class="language-cpp"><script type="text/plain">  double start = evaluateCubic(a, b, c, d, xmin);
+  double end = evaluateCubic(a, b, c, d, xmax);
+
+  if (n <= 1 || xa >= xmax || xb <= xmin || (xa <= xmin && xb >= xmax)) {
+    // [xmin, xmax] is entirely inside monotonic interval
+
+    if (start == 0.) {
+      roots[0] = xmin;
+      return 1;
+    }
+
+    if (end == 0.) {
+      roots[0] = xmax;
+      return 1;
+    }
+
+    if ((start < 0.) == (end < 0.)) return 0; // no intersection
+
+    // for robustness, we directly evaluate
+    if (n == 1 && xa >= xmin && xa <= xmax) {
+      double aval = evaluateCubic(a, b, c, d, xa);
+      if (aval == 0.) {
+        roots[0] = xa;
+        return 1;
+      }
+    }
+
+    roots[0] = safeguardedNewton(a, b, c, d, xmin, xmax, start);
+    return 1;
+  }</script></code></pre>
+        いくつか端っこケースを考慮して条件分岐が存在しているが、それらを読み飛ばせば xmin, xmax の符号が一致している場合は実根なし、それ以外はSafeguarded Newtonに流れるだけである。
+        <br />
+        停留点がしっかり二つあり、\(x_{a}\) と \(x_{b}\) が探索区間内にある場合は、探索区間を \([x_{min}, x_a], [x_a, x_b], [x_b, x_{max}]\) と三つに分けて考える。
+        ここで重要なのは、一つでも解を見つけたら、\((x-r)(ax^2+Bx+C) = 0\) とdeflationすることで、残りを二次式にして解くことができる、という点である。
+        <pre><code class="language-cpp"><script type="text/plain">int deflateCubic(double a, double b, double c, double d, double root, double* roots) {
+  double B = b + a * root;
+  double C = c + B * root;
+  int n = solveQuadratic(a, B, C, roots);
+
+  if (n == 0) return 0;
+
+  for (int i = 0; i < n; ++i) {
+    double x = roots[i];
+    // refine with Newton's method
+    for (int j = 0; j < 2; ++j) {
+      // double derivative = (3 * a * x + 2 * b) * x + c;
+      // if (derivative == 0.) break;
+      // x -= evaluateCubic(a, b, c, d, x) / derivative;
+
+      double ax = a * x;
+      double bx = ax + b;
+      double cx = bx * x + c;
+      double y = cx * x + d;
+      if (y == 0.) break;
+      double derivative = (ax + bx) * x + cx;
+      if (derivative == 0.) break;
+      double next = x - y / derivative;
+      if (next == x) break;
+      x = next;
+    }
+    roots[i] = x;
+  }
+
+  if (n == 2 && roots[0] > roots[1]) {
+    std::swap(roots[0], roots[1]);
+  }
+
+  return n;
+}</script></code></pre>
+        やや冗長な実装だが、synthetic divisionで二次式に変換して解くだけである（上3行が本体）。
+        残りのでかいfor文は、ニュートン法で三次式に戻してrefineする処理が入っている。
+        <br />
+        Safeguarded Newtonと合わせたコードは次のようになる。
+        境界チェックが多すぎて気持ち悪いコードだが、解を一つ見つける＋deflationする、という流れを繰り返すだけである。
+        <pre><code class="language-cpp"><script type="text/plain">  } else {
+    double aval = evaluateCubic(a, b, c, d, xa);
+    double bval = evaluateCubic(a, b, c, d, xb);
+
+    int r = 0;
+    if (start == 0.) {
+      roots[r++] = xmin;
+      return r + deflateCubic(a, b, c, d, roots[0], roots + r);
+    }
+    if (start != 0. && aval != 0. && (start < 0.) != (aval < 0.)) {
+      roots[r++] = safeguardedNewton(a, b, c, d, xmin, xa, start);
+      return r + deflateCubic(a, b, c, d, roots[0], roots + r);
+    }
+    if (aval == 0.) {
+      roots[r++] = xa;
+      double other = -b / a - 2 * xa;
+      if (other != xa) roots[r++] = other;
+      return r;
+    }
+    if (aval != 0. && bval != 0. && (aval < 0.) != (bval < 0.)) {
+      roots[r++] = safeguardedNewton(a, b, c, d, xa, xb, aval);
+      return r + deflateCubic(a, b, c, d, roots[0], roots + r);
+    }
+    if (bval == 0.) {
+      roots[r++] = xb;
+      double other = -b / a - 2 * xb;
+      if (other != xb) roots[r++] = other;
+      return r;
+    }
+    if (bval != 0. && end != 0. && (bval < 0.) != (end < 0.)) {
+      roots[r++] = safeguardedNewton(a, b, c, d, xb, xmax, bval);
+      return r;
+    }
+    if (end == 0.) {
+      roots[r++] = xmax;
+    }
+
+    return r;
+  }</script></code></pre>
+      </p>
+        <p>
+          なお、\(x_{min}\) や \(x_{max}\) を設定する場合では、\([x_{min}, x_{a\ or\ b}], [x_{a\ or\ b}, x_{max}]\) のケースもあるので注意が必要である。
+        </p>
+
+        <details class="expandableScope">
+          <summary>そういうケースのコード</summary>
+        <div class="monotonicPlots">
+          <section class="graphNote" data-frame-surface aria-label="停留点 xa で探索区間を2つに分ける三次関数の固定例" style="position: relative; width: 360px; max-width: 100%; box-sizing: border-box; padding: 4px">
+            <p style="position: absolute; top: 8px; left: 24px; z-index: 1; margin: 0 0 4px; font-size: 95%">\(f(x)=x^3-3x\)</p>
+            <svg width="100%" height="210" viewBox="176 10 616 365" role="img" aria-label="停留点 xa を境に単調増加と単調減少に分かれる探索区間" aria-describedby="splitAtXaPlotDescription" style="display: block">
+              <desc id="splitAtXaPlotDescription">f(x)=x³−3x の探索区間 [xmin, xmax]=[−2, 0.5] 内にある停留点は xa=−1。区間を [xmin, xa] と [xa, xmax] に分けると、前者は単調増加、後者は単調減少となり、それぞれに実根が1つある。もう1つの停留点 xb=1 は xmax より右にある。</desc>
+              <path d="M212 52H392V342H212Z" fill="#276b7a" fill-opacity="0.08" />
+              <path d="M392 52H662V342H392Z" fill="#bf633e" fill-opacity="0.08" />
+              <g fill="none" stroke="#8a9a9d">
+                <path d="M186 198H766 M572 28V368" />
+                <path d="M194 194l-8 4 8 4 M758 194l8 4-8 4 M568 36l4-8 4 8" />
+                <path d="M392 194V202 M752 194V202" />
+              </g>
+              <path d="M212 52V342 M392 52V342 M662 52V342" fill="none" stroke="#8a9a9d" stroke-dasharray="5 5" />
+              <path d="M32 1278 C92 798 152 498 212 318 C272 138 332 78 392 78 C452 78 512 138 572 198 C632 258 692 318 752 318 C812 318 872 258 932 78" fill="none" stroke="#276b7a" stroke-width="2.5" />
+              <g fill="#bf633e" stroke="#fffefa" stroke-width="2">
+                <circle cx="260.230855" cy="198" r="6" />
+                <circle cx="572" cy="198" r="6" />
+              </g>
+              <g fill="#fffefa" stroke="#276b7a" stroke-width="2.5">
+                <circle cx="392" cy="78" r="6" />
+                <circle cx="752" cy="318" r="6" />
+              </g>
+              <g fill="#344137" font-size="18">
+                <text x="584" y="228">0</text>
+                <text x="774" y="203">x</text>
+                <text x="584" y="36">f(x)</text>
+              </g>
+              <foreignObject x="162" y="342" width="100" height="32">
+                <div xmlns="http://www.w3.org/1999/xhtml" style="color: #344137; font-size: 18px; text-align: center">\(x_{min}\)</div>
+              </foreignObject>
+              <foreignObject x="342" y="342" width="100" height="32">
+                <div xmlns="http://www.w3.org/1999/xhtml" style="color: #344137; font-size: 18px; text-align: center">\(x_a\)</div>
+              </foreignObject>
+              <foreignObject x="612" y="342" width="100" height="32">
+                <div xmlns="http://www.w3.org/1999/xhtml" style="color: #344137; font-size: 18px; text-align: center">\(x_{max}\)</div>
+              </foreignObject>
+            </svg>
+          </section>
+        </div>
+        <p>
+          <pre><code class="language-cpp"><script type="text/plain">  if (xa <= xmin) {
+    // xb is inside: [xmin, xb], [xb, xmax]
+    double bval = evaluateCubic(a, b, c, d, xb);
+
+    int r = 0;
+    if (start == 0.) {
+      roots[r++] = xmin;
+    }
+    if (start != 0. && bval != 0. && (start < 0.) != (bval < 0.)) {
+      roots[r++] = safeguardedNewton(a, b, c, d, xmin, xb, start);
+    }
+    if (bval == 0.) {
+      roots[r++] = xb;
+    }
+    if (bval != 0. && end != 0. && (bval < 0.) != (end < 0.)) {
+      roots[r++] = safeguardedNewton(a, b, c, d, xb, xmax, bval);
+    }
+    if (end == 0.) {
+      roots[r++] = xmax;
+    }
+
+    return r;
+  } else if (xb >= xmax) {
+    // xa is inside: [xmin, xa], [xa, xmax]
+    // ...
+  }</script></code></pre>
+        </p>
+        </details>
+    <p>
+      とりあえず実行速度を確かめてみると、なんか期待していた感じではなかった。
+      普通に4倍くらい遅かった。
+      <br />
+      まぁたぶん探索範囲 xmin や xmax を設定して高速だよね、みたいな話なのかな？
+      根がないときとかの計算省略できるとかが重要っぽいし。
+      一般的なケースとして使うと対して速くないのかも。
+      そもそも論文通りに実装していないし、実験設定も同じじゃないのでここら辺はあんまり気にしない。
+    </p>
+    <div class="resultSection">
+      <section class="graphNote benchmarkNote" data-frame-surface aria-label="Analytical/Yuksel results">
+        <table>
+          <thead><tr><th scope="col">Case</th><th scope="col">ns / solve</th><th scope="col" title="Timestamp counter ticks, not actual CPU core cycles">TSC ticks</th><th scope="col" title="Wrong root count, non-finite result, or root error above max(1e-10, 1 ULP) plus unavoidable double rounding error">Failure</th></tr></thead>
+          <tbody data-benchmark-results>
+            <tr><th scope="row" title="All 8 datasets, 65536 inputs per solver. Times are input-count-weighted means of dataset medians; failure rate includes every input.">Analytical</th><td>36.36</td><td>137.9</td><td><span class="failure">18.83%</span></td></tr>
+            <tr><th scope="row" title="All 8 datasets, 65536 inputs per solver. Times are input-count-weighted means of dataset medians; failure rate includes every input.">Yuksel</th><td>129.02</td><td>489.3</td><td><span class="failure">6.31%</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+      <div class="articleText">
+      </div>
+    </div>
+    <p>
+      なお失敗率は、根の絶対値の大きさを極端に変えたケースとかを色々試した結果を大雑把に計測しているので、特に参考になる数字ではない。
+      例えば、根が重複していたり、非常に似ているケースの扱いがそもそも実装上テキトーなので、計測してもって感じ。
+      少し触れるとすると、根の絶対値が大きく異なるケースでは、analytical (44.5%) Yuksel (0.07%) だったので、Yukselはちょいrobustなのかな。
+    </p>
+    <hr />
+    <p>
+      とはいえ何だか悔しいので、analyticalよりも速くなるように実装してみる。
+      ごちゃごちゃ試してもあんまり速くならなかったので、結局はcbrtとかを近似計算に変えて、固定回数のNewton法でrefineするだけ。
+      高速化とはとてもではないが言えない。
+      <pre><code class="language-cpp"><script type="text/plain">int solveCubicMixed(double a, double b, double c, double d, double xmin, double xmax, double* roots) {
+  if (a == 0) return solveQuadratic(b, c, d, roots);
+  if (d == 0) return deflateCubic2(a, b, c, d, 0., roots);
+
+  double ba = b / a;
+  double b3a = ba / 3.0;
+  double ca = c / a;
+  double da = d / a;
+
+  double p = ca - ba * b3a;
+  double q = 2.0 * b3a * b3a * b3a - b3a * ca + da;
+
+  double tp = p / 3.0;
+  double hq = 0.5 * q;
+
+  double discriminant = hq * hq + tp * tp * tp;
+  if (discriminant > 0.0) {
+    double radical = std::sqrt(discriminant);
+    double u = acbrt(-hq - std::copysign(radical, hq));
+    double v = -tp / u;
+    double root = u + v - b3a;
+    roots[0] = fastNewton(a, b, c, d, root);
+    return 1;
+  }
+
+  if (discriminant == 0.0) {
+    double u = acbrt(-hq);
+    double root = 2.0 * u - b3a;
+    if (u == 0.0) {
+      roots[0] = fastNewton(a, b, c, d, root);
+      return 1;
+    }
+
+    __m128d x = _mm_set_pd(-u - b3a, root);
+    _mm_storeu_pd(roots, fastNewton2(a, b, c, d, x));
+    if (roots[0] > roots[1]) std::swap(roots[0], roots[1]);
+    return 2;
+  }
+
+  double r = std::sqrt(-tp);
+  double t = std::abs(hq) / (-tp * r);
+  double factor = aqrf(t);
+  double root = -std::copysign(r * factor, hq) - b3a;
+
+  root = fastNewton(a, b, c, d, root);
+  return deflateCubic2(a, b, c, d, root, roots);
+}</script></code></pre>
+    何とか今回得た知識を僅かには活用してはいるので、まぁ妥協点とは言えるだろうか。
+    <br />
+    Newton法の実装は簡素化しつつ、SIMDで二つの根を同時にrefineしている。
+    <pre><code class="language-cpp"><script type="text/plain">double fastNewton(double a, double b, double c, double d, double x) {
+  for (int i = 0; i < 8; ++i) {
+    double ax = a * x;
+    double bx = ax + b;
+    double cx = bx * x + c;
+    double y = cx * x + d;
+    if (y == 0.) break;
+
+    double derivative = (ax + bx) * x + cx;
+    double next = x - y / derivative;
+    double step = next - x;
+    x = next;
+    if (std::abs(step) <= tolerance) break;
+  }
+
+  return x;
+}
+
+__m128d fastNewton2(double a, double b, double c, double d, __m128d x) {
+  __m128d a2 = _mm_set1_pd(a);
+  __m128d b2 = _mm_set1_pd(b);
+  __m128d c2 = _mm_set1_pd(c);
+  __m128d d2 = _mm_set1_pd(d);
+  __m128d zero = _mm_setzero_pd();
+  __m128d sign = _mm_set1_pd(-0.0);
+  __m128d threshold = _mm_set1_pd(tolerance);
+  __m128d active = _mm_cmpeq_pd(zero, zero);
+
+  for (int i = 0; i < 8; ++i) {
+    __m128d ax = _mm_mul_pd(a2, x);
+    __m128d bx = _mm_add_pd(ax, b2);
+    __m128d cx = _mm_add_pd(_mm_mul_pd(bx, x), c2);
+    __m128d y = _mm_add_pd(_mm_mul_pd(cx, x), d2);
+    active = _mm_and_pd(active, _mm_cmpneq_pd(y, zero));
+    if (_mm_movemask_pd(active) == 0) break;
+
+    __m128d derivative = _mm_add_pd(_mm_mul_pd(_mm_add_pd(ax, bx), x), cx);
+    __m128d next = _mm_sub_pd(x, _mm_div_pd(y, derivative));
+    __m128d step = _mm_sub_pd(next, x);
+    x = _mm_or_pd(_mm_and_pd(active, next), _mm_andnot_pd(active, x));
+    active = _mm_andnot_pd(_mm_cmple_pd(_mm_andnot_pd(sign, step), threshold), active);
+    if (_mm_movemask_pd(active) == 0) break;
+  }
+
+  return x;
+}
+
+int deflateCubic2(double a, double b, double c, double d, double root, double* roots) {
+  roots[0] = root;
+  double B = b + a * root;
+  double C = c + B * root;
+  int n = 1 + solveQuadratic(a, B, C, roots + 1);
+  if (n == 1) return 1;
+
+  if (n == 3) {
+    __m128d x = _mm_loadu_pd(roots + 1);
+    _mm_storeu_pd(roots + 1, fastNewton2(a, b, c, d, x));
+  } else {
+    roots[1] = fastNewton(a, b, c, d, roots[1]);
+  }
+
+  if (n == 3 && roots[1] > roots[2]) std::swap(roots[1], roots[2]);
+
+  if (roots[0] > roots[1]) {
+    std::swap(roots[0], roots[1]);
+    if (n == 3 && roots[1] > roots[2]) std::swap(roots[1], roots[2]);
+  }
+
+  if (n == 2) return 1 + (roots[0] != roots[1]);
+  if (roots[0] == roots[1]) {
+    roots[1] = roots[2];
+    return 1 + (roots[0] != roots[1]);
+  }
+
+  return 2 + (roots[1] != roots[2]);
+}</script></code></pre>
+    cbrtの近似は仮数部を4次の多項式で近似+Halley法で1回補正するやつ、boostのmathとかにちゃんとした実装があると思う。
+    <br />
+    三根あるときに一つだけ見つける処理は、\(r=\sqrt{-p/3}\)、\(t=|q/2|/r^3\) として、\(z^3-3z-2t=0\) の解を5次多項式で近似し、Newton法で1回補正する。
+    <pre><code class="language-cpp"><script type="text/plain">double aqrf(double value) {
+  // approx outer root factor
+  double value2 = value * value;
+  double value4 = value2 * value2;
+  double factor = (1.7320508075688772 + 0.3332382647851845 * value)
+    + (-0.09505002786486583 + 0.04379925469027885 * value) * value2
+    + (-0.017932902400303978 + 0.003894603220828943 * value) * value4;
+  double square = factor * factor;
+  return factor - ((square - 3.0) * factor - 2.0 * value) / (3.0 * (square - 1.0));
+}
+
+double acbrt(double value) {
+  // approx cbrt
+  double magnitude = std::abs(value);
+  std::uint64_t bits = std::bit_cast<std::uint64_t>(magnitude);
+  int exponent = static_cast<int>((bits >> 52) & 2047) - 1023;
+  if (exponent == -1023 || exponent == 1024) return std::cbrt(value);
+
+  double mantissa = std::bit_cast<double>((bits & 0x000fffffffffffffull) | 0x3ff0000000000000ull);
+  int scale = exponent / 3;
+  int remainder = exponent - 3 * scale;
+
+  if (remainder < 0) {
+    remainder += 3;
+    --scale;
+  }
+  double mantissa2 = mantissa * mantissa;
+  double mantissa4 = mantissa2 * mantissa2;
+  double result = (0.5094594523524012 + 0.7115717290617645 * mantissa)
+    + (-0.29420050703893974 + 0.08337335298168705 * mantissa) * mantissa2
+    - 0.010180273440074014 * mantissa4;
+  constexpr double factors[3] = {1., 1.2599210498948732, 1.5874010519681994};
+  double factor = std::bit_cast<double>(static_cast<std::uint64_t>(scale + 1023) << 52);
+  double cube = result * result * result;
+  result *= (cube + 2. * mantissa) / (2. * cube + mantissa);
+  result *= factor * factors[remainder];
+  return value < 0. ? -result : result;
+}</script></code></pre>
+    </p>
+    <div class="resultSection">
+      <section class="graphNote benchmarkNote" data-frame-surface aria-label="Analytical/Yuksel/Mixed results">
+        <table>
+          <thead><tr><th scope="col">Case</th><th scope="col">ns / solve</th><th scope="col" title="Timestamp counter ticks, not actual CPU core cycles">TSC ticks</th><th scope="col" title="Wrong root count, non-finite result, or root error above max(1e-10, 1 ULP) plus unavoidable double rounding error">Failure</th></tr></thead>
+          <tbody data-mixed-benchmark-results>
+            <tr><th scope="row" title="All 8 datasets, 65536 inputs per solver. Times are input-count-weighted means of dataset medians; failure rate includes every input.">Analytical</th><td>36.36</td><td>137.9</td><td><span class="failure">18.83%</span></td></tr>
+            <tr><th scope="row" title="All 8 datasets, 65536 inputs per solver. Times are input-count-weighted means of dataset medians; failure rate includes every input.">Yuksel</th><td>129.02</td><td>489.3</td><td><span class="failure">6.31%</span></td></tr>
+            <tr><th scope="row" title="All 8 datasets, 65536 inputs per solver. Times are input-count-weighted means of dataset medians; failure rate includes every input.">Mixed</th><td>33.28</td><td>126.2</td><td><span class="failure">7.15%</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+    まーじで速度変わらん。MSVCとかで--fast-mathをつけれない状況とかだと嬉しいのかも？
+    たぶんcbrtもUCRTをcallするせいで遅いとかそんな感じだろう。
+    <figure style="margin: 1em 0;">
+      <div style="overflow-x: auto;" tabindex="0">
+        <img src="msvc_sqrtsd.png" alt="MSVCでのstd::sqrtとsqrtsd命令の比較" width="1799" height="667" style="display: block; max-width: none; height: auto;">
+      </div>
+      <figcaption>こういう話</figcaption>
+    </figure>
+    そういう時はこういった強引な実装が有難いのかも知れない。
+    知らんけど。
+    <hr />
+    <p>
+    まぁこんなこともあるか～という週末。
+    </p>
+  </main>
+  <footer class="siteFooter">
+    <p>Except where otherwise noted, original text, images, and other non-code content created by <a href="https://github.com/ymtsh98">ymtsh</a> and published on this website are licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="license noreferrer">CC BY 4.0</a>.</p>
+    <p>This license does not apply to third-party content or other material identified as being subject to separate terms.</p>
+    <p>The source code of this website is licensed under the <a href="../../../license.html">MIT License</a>.</p>
+  </footer>
+  <script>
+    document.querySelectorAll('pre code > script[type="text/plain"]').forEach((source) => {
+      source.parentElement.textContent = source.textContent;
+    });
+
+    function fitMath() {
+    document.querySelectorAll('mjx-container[display="true"]').forEach((math) => {
+    math.style.fontSize = '';
+
+    const parent = math.parentElement;
+    const available = parent.clientWidth;
+    const width = math.scrollWidth;
+
+    if (width > available) {
+    math.style.fontSize = `${available / width}em`;
+    }
+    });
+    }
+
+    window.addEventListener('load', () => {
+    setTimeout(fitMath, 0);
+    });
+
+    window.addEventListener('resize', fitMath);
+  </script>
+</body>
+</html>
