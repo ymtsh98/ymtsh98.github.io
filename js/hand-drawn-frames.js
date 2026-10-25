@@ -128,15 +128,18 @@ const handDrawnFrames = (() => {
   };
 
   const render = () => {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
+    const canvasRect = canvas.getBoundingClientRect();
+    const width = canvasRect.width;
+    const height = canvasRect.height;
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
     const color = getCssValue("--link-ink", "#263f56");
 
     canvas.width = Math.ceil(width * pixelRatio);
     canvas.height = Math.ceil(height * pixelRatio);
-    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    context.clearRect(0, 0, width, height);
+    const scaleX = canvas.width / width;
+    const scaleY = canvas.height / height;
+    context.setTransform(scaleX, 0, 0, scaleY, -canvasRect.left * scaleX, -canvasRect.top * scaleY);
+    context.clearRect(canvasRect.left, canvasRect.top, width, height);
     context.lineCap = "butt";
     context.lineJoin = "miter";
 
@@ -163,7 +166,7 @@ const handDrawnFrames = (() => {
               || (owner && (surface.z < owner.z || (surface.z === owner.z && index < surfaceIndex)))) return;
           const rect = surface.rect;
           const exclusion = new Path2D();
-          exclusion.rect(0, 0, width, height);
+          exclusion.rect(canvasRect.left, canvasRect.top, width, height);
           if (surface.style.clipPath.startsWith("polygon(")) {
             const points = surface.style.clipPath.slice(8, -1).split(",").map(point => point.trim().split(/\s+/).map(parseFloat));
             points.forEach(([x, y], i) => i ? exclusion.lineTo(rect.left + x, rect.top + y) : exclusion.moveTo(rect.left + x, rect.top + y));
@@ -198,6 +201,7 @@ const handDrawnFrames = (() => {
   window.addEventListener("scroll", scheduleRender, { passive: true });
   window.addEventListener("load", scheduleRender, { once: true });
   window.visualViewport?.addEventListener("resize", scheduleRender, { passive: true });
+  window.visualViewport?.addEventListener("scroll", scheduleRender, { passive: true });
   document.fonts?.ready?.then(scheduleRender);
 
   new MutationObserver(scheduleRender).observe(document.body, {
