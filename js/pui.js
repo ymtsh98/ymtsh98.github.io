@@ -12,6 +12,17 @@
     return;
   }
 
+  const configureVideo = (element) => {
+    element.muted = true;
+    element.defaultMuted = true;
+    element.playsInline = true;
+    element.setAttribute("muted", "");
+    element.setAttribute("playsinline", "");
+    element.setAttribute("webkit-playsinline", "");
+  };
+
+  configureVideo(video);
+
   const videoFps = 48;
   const otherHoverFrame = 22;
   const rendererUrl = new URL("pui-4dgs.js?v=20261025-13", document.currentScript.src).href;
@@ -123,8 +134,9 @@
     }
     discardReversePreparation();
     const decoder = document.createElement("video");
-    decoder.muted = true;
-    decoder.playsInline = true;
+    configureVideo(decoder);
+    decoder.className = "puiDecoder";
+    decoder.setAttribute("aria-hidden", "true");
     decoder.preload = "auto";
     const preparation = {
       firstFrame,
@@ -137,8 +149,12 @@
     const signal = preparation.controller.signal;
     preparation.promise = (async () => {
       try {
+        media.appendChild(decoder);
         decoder.src = video.currentSrc || video.src;
         decoder.load();
+        await decoder.play();
+        decoder.pause();
+        signal.throwIfAborted();
         await waitForMedia(decoder, ["loadedmetadata"], () => decoder.readyState >= 1, signal);
         const ratio = window.devicePixelRatio || 1;
         const scale = Math.min(1, media.clientWidth * ratio / decoder.videoWidth,
@@ -202,6 +218,7 @@
         decoder.pause();
         decoder.removeAttribute("src");
         decoder.load();
+        decoder.remove();
       }
     })();
     return preparation.promise;
@@ -210,6 +227,15 @@
   video.addEventListener("loadeddata", showFrame);
   video.addEventListener("seeked", presentVideoFrame);
   showFrame();
+  const initialPlaybackRevision = playbackRevision;
+  video.play().then(() => {
+    if (initialPlaybackRevision === playbackRevision && !isVideoAnimating && canvas.hidden) {
+      video.pause();
+      showFrame();
+    }
+  }).catch((error) => {
+    if (error?.name !== "NotAllowedError" && error?.name !== "AbortError") console.error(error);
+  });
 
   const stopPlayback = ({ preserveReverse = false } = {}) => {
     playbackRevision += 1;
@@ -261,13 +287,15 @@
 
   const playVideoForward = (revision) => {
     const wrapsToStart = isFinishingSelf || isPlayingSelf;
+    const firstFrame = currentFrame;
+    let positioned = false;
     const draw = () => {
       if (revision !== playbackRevision) return;
       if (video.ended) {
         finishVideoPlayback(wrapsToStart ? 0 : targetFrame);
         return;
       }
-      if (video.readyState >= 2 && !video.seeking) {
+      if (positioned && video.readyState >= 2 && !video.seeking) {
         const frame = Math.min(47, Math.floor(video.currentTime * videoFps));
         if (!wrapsToStart && frame >= targetFrame) {
           finishVideoPlayback(targetFrame);
@@ -281,25 +309,27 @@
       videoAnimationFrame = requestAnimationFrame(draw);
     };
     const cleanup = () => {
-      video.removeEventListener("seeked", start);
-      video.removeEventListener("loadeddata", start);
+      video.removeEventListener("loadedmetadata", position);
       cancelPlaybackWait = undefined;
     };
-    const start = () => {
+    const position = () => {
       if (revision !== playbackRevision) {
         cleanup();
-      } else if (video.readyState >= 2 && !video.seeking) {
+      } else if (!positioned && video.readyState >= 1) {
+        positioned = true;
+        const time = (firstFrame + 0.5) / videoFps;
+        if (Math.abs(video.currentTime - time) > 0.000001) {
+          video.currentTime = time;
+        }
         cleanup();
-        video.playbackRate = 1;
-        video.play().catch((error) => reportPlaybackError(revision, error));
-        videoAnimationFrame = requestAnimationFrame(draw);
       }
     };
-    showFrame();
     cancelPlaybackWait = cleanup;
-    video.addEventListener("seeked", start);
-    video.addEventListener("loadeddata", start);
-    start();
+    video.addEventListener("loadedmetadata", position);
+    video.playbackRate = 1;
+    position();
+    video.play().catch((error) => reportPlaybackError(revision, error));
+    videoAnimationFrame = requestAnimationFrame(draw);
   };
 
   const playVideoReverse = (revision) => {
