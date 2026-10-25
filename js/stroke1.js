@@ -23,13 +23,39 @@ stroke1Tiles.forEach((tile) => {
   const hoverSrc = image.dataset.strokeHoverSrc;
   let fadeTimer;
   let lastTouchActivation = Number.NEGATIVE_INFINITY;
+  let isHoverImageLoading = false;
+  let isHoverImageLoaded = false;
+  let isActivationRequested = false;
 
   if (!thumbnailSrc || !hoverSrc) {
     return;
   }
 
   const hoverImage = new Image();
-  hoverImage.src = hoverSrc;
+
+  const preloadHoverImage = (priority = "low") => {
+    if (isHoverImageLoading || isHoverImageLoaded) {
+      return;
+    }
+
+    isHoverImageLoading = true;
+    hoverImage.fetchPriority = priority;
+    hoverImage.src = hoverSrc;
+  };
+
+  const scheduleHoverPreload = () => {
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(() => preloadHoverImage());
+    } else {
+      window.setTimeout(() => preloadHoverImage(), 0);
+    }
+  };
+
+  if (document.readyState === "complete") {
+    scheduleHoverPreload();
+  } else {
+    window.addEventListener("load", scheduleHoverPreload, { once: true });
+  }
 
   const finishFade = () => {
     fadeTimer = undefined;
@@ -55,6 +81,7 @@ stroke1Tiles.forEach((tile) => {
   };
 
   const deactivateStroke1 = ({ fade = false, restoreGrid = false } = {}) => {
+    isActivationRequested = false;
     window.clearTimeout?.(fadeTimer);
     image.src = thumbnailSrc;
 
@@ -71,7 +98,7 @@ stroke1Tiles.forEach((tile) => {
     }
   };
 
-  const activateStroke1 = () => {
+  const startStroke1 = () => {
     window.galleryEffects.activate("stroke1");
     window.clearTimeout?.(fadeTimer);
     document.body.classList.remove("stroke1Active", "stroke1Fading");
@@ -92,6 +119,30 @@ stroke1Tiles.forEach((tile) => {
     document.body.classList.add("stroke1Active");
     image.src = hoverSrc;
   };
+
+  const activateStroke1 = () => {
+    isActivationRequested = true;
+
+    if (isHoverImageLoaded) {
+      startStroke1();
+    } else {
+      preloadHoverImage("high");
+    }
+  };
+
+  hoverImage.addEventListener("load", () => {
+    isHoverImageLoading = false;
+    isHoverImageLoaded = true;
+
+    if (isActivationRequested) {
+      startStroke1();
+    }
+  });
+
+  hoverImage.addEventListener("error", () => {
+    isHoverImageLoading = false;
+    isActivationRequested = false;
+  });
 
   document.addEventListener("gallery:effectactivate", (event) => {
     if (event.detail?.effect !== "stroke1") {
@@ -129,7 +180,7 @@ stroke1Tiles.forEach((tile) => {
 
   document.addEventListener("click", (event) => {
     if (
-      !document.body.classList.contains("stroke1Active") ||
+      (!isActivationRequested && !document.body.classList.contains("stroke1Active")) ||
       event.target?.closest?.(".image, a")
     ) {
       return;

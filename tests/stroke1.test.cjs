@@ -10,6 +10,9 @@ const styles = fs.readFileSync(path.join(__dirname, "..", "css", "stroke1.css"),
 
 const createHarness = ({
   hover = true,
+  preloadComplete = true,
+  readyState = "complete",
+  useIdleCallback = true,
   computedStyles = {
     after: { opacity: "0", transform: "matrix(1, 0, 0, 0, 0, 0)" },
     before: { opacity: "1", transform: "matrix(1, 0, 0, 1, 0, 0)" }
@@ -19,11 +22,15 @@ const createHarness = ({
   const listeners = new Map();
   const bodyClasses = new Set();
   const documentListeners = new Map();
+  const windowListeners = new Map();
   const timers = [];
+  const idleCallbacks = [];
+  const preloadImages = [];
+  const preloadRequests = [];
   const imageListeners = new Map();
   const cssVariables = new Map();
   const image = {
-    dataset: { strokeHoverSrc: "images/2026/stroke1.webp" },
+    dataset: { strokeHoverSrc: "images/2026/stroke1.apng" },
     src: "images/2026/stroke1.png",
     addEventListener(type, listener) {
       imageListeners.set(type, listener);
@@ -47,6 +54,7 @@ const createHarness = ({
     }
   };
   const document = {
+    readyState,
     body: {
       offsetWidth: 320,
       style: {
@@ -58,11 +66,11 @@ const createHarness = ({
         }
       },
       classList: {
-        add(name) {
-          bodyClasses.add(name);
+        add(...names) {
+          names.forEach((name) => bodyClasses.add(name));
         },
-        remove(name) {
-          bodyClasses.delete(name);
+        remove(...names) {
+          names.forEach((name) => bodyClasses.delete(name));
         },
         contains(name) {
           return bodyClasses.has(name);
@@ -82,14 +90,32 @@ const createHarness = ({
   vm.runInNewContext(script, {
     document,
     Image: class {
+      constructor() {
+        this.listeners = new Map();
+        preloadImages.push(this);
+      }
+
+      addEventListener(type, listener) {
+        this.listeners.set(type, listener);
+      }
+
+      emit(type) {
+        this.listeners.get(type)?.();
+      }
+
       set src(value) {
         this.currentSrc = value;
+        preloadRequests.push({ src: value, priority: this.fetchPriority });
       }
     },
     performance: { now: () => 0 },
     getComputedStyle: (_, pseudo) => computedStyles[pseudo === "::after" ? "after" : "before"],
     window: {
+      addEventListener(type, listener) {
+        windowListeners.set(type, listener);
+      },
       matchMedia: () => ({ matches: hover }),
+      requestIdleCallback: useIdleCallback ? (callback) => idleCallbacks.push(callback) : undefined,
       setTimeout(callback) {
         timers.push(callback);
         return timers.length;
@@ -106,25 +132,204 @@ const createHarness = ({
     }
   }, { filename: "stroke1.js" });
 
-  return {
+  const harness = {
     backgroundCalls,
     bodyClasses,
     cssVariables,
     documentListeners,
     image,
     listeners,
+    preloadImage: preloadImages[0],
+    preloadRequests,
+    emitDocument(type, event) {
+      documentListeners.get(type)?.forEach((listener) => listener(event));
+    },
+    finishPageLoad() {
+      document.readyState = "complete";
+      windowListeners.get("load")?.();
+    },
+    runIdleCallbacks() {
+      idleCallbacks.splice(0).forEach((callback) => callback());
+    },
     runTimers() {
       timers.splice(0).forEach((callback) => callback());
     }
   };
+
+  if (preloadComplete) {
+    if (document.readyState !== "complete") {
+      harness.finishPageLoad();
+    }
+
+    harness.runIdleCallbacks();
+    harness.runTimers();
+    harness.preloadImage.emit("load");
+  }
+
+  return harness;
 };
+
+test("APNG preloading waits for the page load and an idle callback", () => {
+  const harness = createHarness({ preloadComplete: false, readyState: "interactive" });
+
+  harness.runIdleCallbacks();
+  assert.equal(harness.preloadRequests.length, 0);
+
+  harness.finishPageLoad();
+  assert.equal(harness.preloadRequests.length, 0);
+
+  harness.runIdleCallbacks();
+  assert.deepEqual(harness.preloadRequests, [{
+    src: "images/2026/stroke1.apng",
+    priority: "low"
+  }]);
+
+  harness.preloadImage.emit("load");
+  assert.equal(harness.image.src, "images/2026/stroke1.png");
+  assert.equal(harness.bodyClasses.has("stroke1Active"), false);
+  assert.deepEqual(harness.backgroundCalls, []);
+});
+
+test("an already loaded page still defers APNG preloading until idle", () => {
+  const harness = createHarness({ preloadComplete: false });
+
+  assert.equal(harness.preloadRequests.length, 0);
+  harness.runIdleCallbacks();
+  assert.equal(harness.preloadRequests.length, 1);
+});
+
+test("APNG preloading falls back to a task after page load without idle callbacks", () => {
+  const harness = createHarness({
+    preloadComplete: false,
+    readyState: "interactive",
+    useIdleCallback: false
+  });
+
+  harness.runTimers();
+  assert.equal(harness.preloadRequests.length, 0);
+
+  harness.finishPageLoad();
+  assert.equal(harness.preloadRequests.length, 0);
+
+  harness.runTimers();
+  assert.equal(harness.preloadRequests.length, 1);
+  assert.equal(harness.preloadRequests[0].priority, "low");
+});
+
+test("early hover loads the APNG on demand and waits before starting effects", () => {
+  const harness = createHarness({ preloadComplete: false, readyState: "interactive" });
+
+  harness.listeners.get("mouseenter")();
+  harness.listeners.get("mouseenter")();
+  assert.deepEqual(harness.preloadRequests, [{
+    src: "images/2026/stroke1.apng",
+    priority: "high"
+  }]);
+  assert.equal(harness.image.src, "images/2026/stroke1.png");
+  assert.equal(harness.bodyClasses.has("stroke1Active"), false);
+  assert.deepEqual(harness.backgroundCalls, []);
+
+  harness.preloadImage.emit("load");
+  assert.equal(harness.image.src, "images/2026/stroke1.apng");
+  assert.equal(harness.bodyClasses.has("stroke1Active"), true);
+  assert.deepEqual(harness.backgroundCalls, [["fade"]]);
+
+  harness.finishPageLoad();
+  harness.runIdleCallbacks();
+  assert.equal(harness.preloadRequests.length, 1);
+});
+
+test("hover during background preloading reuses the request and waits for the APNG", () => {
+  const harness = createHarness({ preloadComplete: false });
+
+  harness.runIdleCallbacks();
+  harness.listeners.get("mouseenter")();
+  assert.equal(harness.preloadRequests.length, 1);
+  assert.equal(harness.image.src, "images/2026/stroke1.png");
+  assert.deepEqual(harness.backgroundCalls, []);
+
+  harness.preloadImage.emit("load");
+  assert.equal(harness.image.src, "images/2026/stroke1.apng");
+  assert.deepEqual(harness.backgroundCalls, [["fade"]]);
+});
+
+test("leaving while loading cancels playback without discarding the preload", () => {
+  const harness = createHarness({ preloadComplete: false });
+
+  harness.listeners.get("mouseenter")();
+  harness.listeners.get("mouseleave")({ relatedTarget: { closest: () => ({}) } });
+  harness.preloadImage.emit("load");
+  assert.equal(harness.image.src, "images/2026/stroke1.png");
+  assert.equal(harness.bodyClasses.has("stroke1Active"), false);
+  assert.deepEqual(harness.backgroundCalls, []);
+
+  harness.listeners.get("mouseenter")();
+  assert.equal(harness.image.src, "images/2026/stroke1.apng");
+  assert.equal(harness.preloadRequests.length, 1);
+  assert.deepEqual(harness.backgroundCalls, [["fade"]]);
+});
+
+test("touch waits for the APNG and ignores the following synthetic click", () => {
+  const harness = createHarness({ hover: false, preloadComplete: false });
+
+  harness.image.emit("pointerup", { pointerType: "touch" });
+  harness.image.emit("click");
+  assert.equal(harness.image.src, "images/2026/stroke1.png");
+  assert.deepEqual(harness.backgroundCalls, []);
+
+  harness.preloadImage.emit("load");
+  assert.equal(harness.image.src, "images/2026/stroke1.apng");
+  assert.equal(harness.preloadRequests.length, 1);
+  assert.deepEqual(harness.backgroundCalls, [["fade"]]);
+});
+
+test("another gallery effect cancels pending touch playback", () => {
+  const harness = createHarness({ hover: false, preloadComplete: false });
+
+  harness.image.emit("pointerup", { pointerType: "touch" });
+  harness.emitDocument("gallery:effectactivate", { detail: { effect: "fervidum" } });
+  harness.preloadImage.emit("load");
+
+  assert.equal(harness.image.src, "images/2026/stroke1.png");
+  assert.equal(harness.bodyClasses.has("stroke1Active"), false);
+  assert.deepEqual(harness.backgroundCalls, []);
+});
+
+test("an outside click cancels pending touch playback", () => {
+  const harness = createHarness({ hover: false, preloadComplete: false });
+
+  harness.image.emit("click");
+  harness.emitDocument("click", { target: { closest: () => null } });
+  harness.preloadImage.emit("load");
+
+  assert.equal(harness.image.src, "images/2026/stroke1.png");
+  assert.equal(harness.bodyClasses.has("stroke1Active"), false);
+  assert.deepEqual(harness.backgroundCalls, [["restore-transparent"]]);
+});
+
+test("a failed APNG load keeps the thumbnail and can retry on the next interaction", () => {
+  const harness = createHarness({ hover: false, preloadComplete: false });
+
+  harness.image.emit("click");
+  harness.preloadImage.emit("error");
+  assert.equal(harness.image.src, "images/2026/stroke1.png");
+  assert.equal(harness.bodyClasses.has("stroke1Active"), false);
+  assert.deepEqual(harness.backgroundCalls, []);
+
+  harness.image.emit("click");
+  assert.equal(harness.preloadRequests.length, 2);
+
+  harness.preloadImage.emit("load");
+  assert.equal(harness.image.src, "images/2026/stroke1.apng");
+  assert.deepEqual(harness.backgroundCalls, [["fade"]]);
+});
 
 test("hover switches the stroke image and fades the outgoing background", () => {
   const harness = createHarness();
 
   harness.listeners.get("mouseenter")();
   assert.ok(harness.bodyClasses.has("stroke1Active"));
-  assert.equal(harness.image.src, "images/2026/stroke1.webp");
+  assert.equal(harness.image.src, "images/2026/stroke1.apng");
   assert.deepEqual(harness.backgroundCalls, [["fade"]]);
 
   harness.listeners.get("mouseleave")({});
@@ -188,7 +393,7 @@ test("touch starts stroke1 without installing hover listeners", () => {
   harness.image.emit("pointerup", { pointerType: "touch" });
 
   assert.ok(harness.bodyClasses.has("stroke1Active"));
-  assert.equal(harness.image.src, "images/2026/stroke1.webp");
+  assert.equal(harness.image.src, "images/2026/stroke1.apng");
 });
 
 test("stroke1 keeps its hover capability variable separate from fervidum", () => {
