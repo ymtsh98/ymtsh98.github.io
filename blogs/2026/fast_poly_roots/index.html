@@ -310,8 +310,8 @@
         3. このとき各区間は単調であることを利用し、ある一つの解をニュートン法でゴリゴリ見つける、範囲外にはみ出した場合はbisection \(x_{next}=\frac{left+right}{2}\) に切り替えて探索を進める（Safeguarded Newton）<br />
         4. 残りの解は元の式をdeflationして二次方程式にして解く<br />
 
-        \(x_{min}, x_{max}\) は任意の範囲でかつ、この後の分岐にも多数あらわれるが、特に指定がない限り無限区間（xmin=-inf, xmax=+inf）を想定する。
-        下記実装では、infの時にCauchy boundを利用している。
+        論文と強く異なりそうな点として、\(x_{min}, x_{max}\) は基本的には無限区間（xmin=-inf, xmax=+inf）を想定している（元論文も想定はしているが、パフォーマンスとかは0~1の範囲が主軸の話）。
+        なので（？）下記実装では、初手infの時にCauchy boundを利用して範囲を狭めている。
         <pre><code class="language-cpp"><script type="text/plain">double evaluateCubic(double a, double b, double c, double d, double x) {
   return ((a * x + b) * x + c) * x + d;
 }
@@ -384,7 +384,7 @@ int solveCubicYuksel(double a, double b, double c, double d, double xmin, double
         <br />
         さて、Yuskelのペーパーを読んでいて「確かにな」となるポイントは、丁寧に区間を分けしてちゃんと計算を削ろうという点にある。
         例えば \(f(x)\) が単調な区間を考えると、これは、停留点 n が n<=1 のとき、または二つの停留点が xmin, xmax の外側に位置するときである。
-        そして単調な区間ならば、実根は一つもしくは存在しないため、safeguarded Newtonを一回呼ぶことで処理が終了する。
+        そして単調な区間ならば、実根は一つもしくは存在しないため、Safeguarded Newtonを一回呼ぶことで処理が終了する。
       </p>
       <div class="monotonicPlots">
         <section class="graphNote" data-frame-surface aria-label="停留点が1つの三次関数の固定例" style="position: relative; width: 360px; max-width: 100%; box-sizing: border-box; padding: 4px">
@@ -636,7 +636,7 @@ int solveCubicYuksel(double a, double b, double c, double d, double xmin, double
       とりあえず実行速度を確かめてみると、なんか期待していた感じではなかった。
       普通に4倍くらい遅かった。
       <br />
-      まぁたぶん探索範囲 xmin や xmax を設定して高速だよね、みたいな話なのかな？
+      まぁたぶん探索範囲 xmin や xmax を設定して高速だよね、みたいな話なんだと思う。
       根がないときとかの計算省略できるとかが重要っぽいし。
       一般的なケースとして使うと対して速くないのかも。
       そもそも論文通りに実装していないし、実験設定も同じじゃないのでここら辺はあんまり気にしない。
@@ -660,7 +660,7 @@ int solveCubicYuksel(double a, double b, double c, double d, double xmin, double
     <hr />
     <p>
       とはいえ何だか悔しいので、analyticalよりも速くなるように実装してみる。
-      ごちゃごちゃ試してもあんまり速くならなかったので、結局はcbrtとかを近似計算に変えて、固定回数のNewton法でrefineするだけ。
+      ごちゃごちゃ試してもあんまり速くならなかったので、結局はcbrtとかを近似計算に変えて、固定回数（=8は朧気な数字）のNewton法でrefineするだけ。
       高速化とはとてもではないが言えない。
       <pre><code class="language-cpp"><script type="text/plain">int solveCubicMixed(double a, double b, double c, double d, double xmin, double xmax, double* roots) {
   if (a == 0) return solveQuadratic(b, c, d, roots);

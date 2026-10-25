@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="css/style.css?v=20260803-ballpoint-frames-3">
   <link rel="stylesheet" href="css/stroke1.css?v=20260803-effect-transition-4">
   <link rel="stylesheet" href="css/fervidum.css?v=20260803-effect-transition-1">
+  <link rel="stylesheet" href="css/pui.css?v=20261025-4dgs-5">
   <script>
     if (window.location.protocol === "file:") {
     document.write('<script src="js/fervidum-local-texture.js"><' + '/script>');
@@ -22,6 +23,7 @@
   <script src="js/box-connections.js?v=20260803-shared-connections-8" defer></script>
   <script src="js/stroke1.js?v=20261025-background-preload-1" defer></script>
   <script src="js/fervidum.js?v=20260803-effect-transition-2" defer></script>
+  <script src="js/pui.js?v=20261025-4dgs-19" defer></script>
 </head>
 <body>
   <canvas class="handDrawnFrames" aria-hidden="true"></canvas>
@@ -36,6 +38,20 @@
       </div>
     </nav>
     <main class="gallery">
+      <article class="tile puiTile">
+        <div class="puiMedia">
+          <video class="image pui"
+                 src="images/2026/pui.webm"
+                 preload="auto"
+                 muted
+                 playsinline
+                 aria-label="pui"></video>
+          <canvas class="image puiDisplay" tabindex="0" aria-label="pui 4DGS"></canvas>
+          <canvas class="puiViewer" aria-hidden="true" hidden></canvas>
+          <span class="puiViewerStatus" role="status" hidden></span>
+        </div>
+        <p class="photoNote">Pui</p>
+      </article>
       <article class="tile stroke1Tile">
         <img class="image stroke1"
              src="images/2026/stroke1.png"

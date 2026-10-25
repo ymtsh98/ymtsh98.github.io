@@ -494,7 +494,7 @@ a {
     "feature wide-two";
   grid-template-columns: var(
     --image-gallery-columns,
-    minmax(0, 0.74fr) minmax(0, 1fr)
+    minmax(0, 1fr) minmax(0, 1fr)
   );
   align-items: start;
   gap: var(--gallery-gap);
