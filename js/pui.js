@@ -14,7 +14,7 @@
 
   const videoFps = 48;
   const otherHoverFrame = 22;
-  const rendererUrl = new URL("pui-4dgs.js?v=20261025-12", document.currentScript.src).href;
+  const rendererUrl = new URL("pui-4dgs.js?v=20261025-13", document.currentScript.src).href;
   const canUseHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   let currentFrame = 0;
   let targetFrame = 0;
@@ -22,8 +22,8 @@
   let videoAnimationFrame = 0;
   let playbackRevision = 0;
   let isVideoAnimating = false;
-  const videoFrames = [];
-  let videoFramesPromise;
+  let reversePreparation;
+  let cancelPlaybackWait;
   let isOtherImageSelected = false;
   let shouldHoldOtherFrame = false;
   let isSelected = false;
@@ -50,17 +50,18 @@
     displayContext.drawImage(source, 0, 0, width, height);
   };
 
-  const isVideoFrameReady = () => Boolean(videoFrames[currentFrame])
+  const isVideoFrameReady = () => Boolean(reversePreparation?.frames.has(currentFrame))
     || (video.readyState >= 2 && !video.seeking);
 
   const presentVideoFrame = () => {
     if (canvas.hidden && isVideoFrameReady()) {
-      presentFrame(videoFrames[currentFrame] || video);
+      presentFrame(reversePreparation?.frames.get(currentFrame) || video);
     }
   };
 
   const showFrame = () => {
-    if (!videoFrames[currentFrame] && (canvas.hidden || isReturningToFront) && video.readyState >= 1) {
+    if (!reversePreparation?.frames.has(currentFrame) && (canvas.hidden || isReturningToFront)
+      && video.readyState >= 1 && video.paused) {
       const time = (currentFrame + 0.5) / videoFps;
       if (Math.abs(video.currentTime - time) > 0.000001) {
         video.currentTime = time;
@@ -72,84 +73,151 @@
     }
   };
 
-  const loadVideoFrames = () => {
-    if (!videoFramesPromise) {
-      videoFramesPromise = (async () => {
-        const decoder = document.createElement("video");
-        decoder.muted = true;
-        decoder.playsInline = true;
-        decoder.preload = "auto";
-        try {
-          await new Promise((resolve, reject) => {
-            const cleanup = () => {
-              decoder.removeEventListener("loadedmetadata", ready);
-              decoder.removeEventListener("error", fail);
-            };
-            const ready = () => {
-              cleanup();
-              resolve();
-            };
-            const fail = () => {
-              cleanup();
-              reject(new Error("動画を読み込めませんでした。"));
-            };
-            decoder.addEventListener("loadedmetadata", ready);
-            decoder.addEventListener("error", fail);
-            decoder.src = video.currentSrc || video.src;
-            decoder.load();
-          });
-          for (let frame = 0; frame < 48; frame++) {
-            await new Promise((resolve, reject) => {
-              const cleanup = () => {
-                decoder.removeEventListener("seeked", ready);
-                decoder.removeEventListener("loadeddata", ready);
-                decoder.removeEventListener("error", fail);
-              };
-              const ready = () => {
-                if (decoder.readyState >= 2 && !decoder.seeking) {
-                  cleanup();
-                  resolve();
-                }
-              };
-              const fail = () => {
-                cleanup();
-                reject(new Error("動画のフレームを読み込めませんでした。"));
-              };
-              decoder.addEventListener("seeked", ready);
-              decoder.addEventListener("loadeddata", ready);
-              decoder.addEventListener("error", fail);
-              decoder.currentTime = (frame + 0.5) / videoFps;
-              ready();
-            });
-            const image = document.createElement("canvas");
-            image.width = decoder.videoWidth;
-            image.height = decoder.videoHeight;
-            image.getContext("2d").drawImage(decoder, 0, 0);
-            videoFrames[frame] = image;
-          }
-        } finally {
-          decoder.pause();
-          decoder.removeAttribute("src");
-          decoder.load();
-        }
-      })().catch((error) => {
-        videoFramesPromise = undefined;
-        throw error;
-      });
+  const waitForMedia = (element, events, isReady, signal) => new Promise((resolve, reject) => {
+    const cleanup = () => {
+      events.forEach((type) => element.removeEventListener(type, check));
+      element.removeEventListener("error", fail);
+      signal.removeEventListener("abort", abort);
+    };
+    const check = () => {
+      if (isReady()) {
+        cleanup();
+        resolve();
+      }
+    };
+    const fail = () => {
+      cleanup();
+      reject(new Error("動画を読み込めませんでした。"));
+    };
+    const abort = () => {
+      cleanup();
+      reject(new DOMException("再生を中断しました。", "AbortError"));
+    };
+    events.forEach((type) => element.addEventListener(type, check));
+    element.addEventListener("error", fail);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    else check();
+  });
+
+  const releaseReverseFrames = (preparation) => {
+    preparation.frames.forEach((image) => {
+      image.width = 0;
+      image.height = 0;
+    });
+    preparation.frames.clear();
+  };
+
+  const discardReversePreparation = () => {
+    if (!reversePreparation) return;
+    const preparation = reversePreparation;
+    reversePreparation = undefined;
+    preparation.controller.abort();
+    preparation.decoder.pause();
+    releaseReverseFrames(preparation);
+  };
+
+  const prepareReverseFrames = (firstFrame, lastFrame) => {
+    if (reversePreparation?.firstFrame === firstFrame && reversePreparation.lastFrame === lastFrame) {
+      return reversePreparation.promise;
     }
-    return videoFramesPromise;
+    discardReversePreparation();
+    const decoder = document.createElement("video");
+    decoder.muted = true;
+    decoder.playsInline = true;
+    decoder.preload = "auto";
+    const preparation = {
+      firstFrame,
+      lastFrame,
+      decoder,
+      controller: new AbortController(),
+      frames: new Map()
+    };
+    reversePreparation = preparation;
+    const signal = preparation.controller.signal;
+    preparation.promise = (async () => {
+      try {
+        decoder.src = video.currentSrc || video.src;
+        decoder.load();
+        await waitForMedia(decoder, ["loadedmetadata"], () => decoder.readyState >= 1, signal);
+        const ratio = window.devicePixelRatio || 1;
+        const scale = Math.min(1, media.clientWidth * ratio / decoder.videoWidth,
+          media.clientHeight * ratio / decoder.videoHeight);
+        const width = Math.max(1, Math.round(decoder.videoWidth * scale));
+        const height = Math.max(1, Math.round(decoder.videoHeight * scale));
+        const capture = (frame) => {
+          if (preparation.frames.has(frame)) return;
+          const image = document.createElement("canvas");
+          image.width = width;
+          image.height = height;
+          image.getContext("2d").drawImage(decoder, 0, 0, width, height);
+          preparation.frames.set(frame, image);
+        };
+        const seek = async (frame) => {
+          signal.throwIfAborted();
+          decoder.currentTime = (frame + 0.5) / videoFps;
+          await waitForMedia(decoder, ["seeked", "loadeddata"],
+            () => decoder.readyState >= 2 && !decoder.seeking, signal);
+        };
+        await seek(lastFrame);
+        capture(lastFrame);
+        if (decoder.requestVideoFrameCallback && firstFrame > lastFrame) {
+          try {
+            await new Promise((resolve, reject) => {
+              let callback;
+              const cleanup = () => {
+                decoder.cancelVideoFrameCallback(callback);
+                decoder.removeEventListener("ended", finish);
+                decoder.removeEventListener("error", fail);
+                signal.removeEventListener("abort", abort);
+                decoder.pause();
+              };
+              const finish = () => { cleanup(); resolve(); };
+              const fail = (error) => { cleanup(); reject(error); };
+              const abort = () => fail(new DOMException("再生を中断しました。", "AbortError"));
+              const collect = (_, metadata) => {
+                const frame = Math.round(metadata.mediaTime * videoFps);
+                if (frame >= lastFrame && frame <= firstFrame) capture(frame);
+                if (frame >= firstFrame) finish();
+                else callback = decoder.requestVideoFrameCallback(collect);
+              };
+              decoder.addEventListener("ended", finish);
+              decoder.addEventListener("error", fail);
+              signal.addEventListener("abort", abort, { once: true });
+              callback = decoder.requestVideoFrameCallback(collect);
+              decoder.play().catch(fail);
+            });
+          } catch (error) {
+            if (signal.aborted) throw error;
+          }
+        }
+        for (let frame = lastFrame; frame <= firstFrame; frame++) {
+          if (!preparation.frames.has(frame)) {
+            await seek(frame);
+            capture(frame);
+          }
+        }
+        return preparation;
+      } finally {
+        decoder.pause();
+        decoder.removeAttribute("src");
+        decoder.load();
+      }
+    })();
+    return preparation.promise;
   };
 
   video.addEventListener("loadeddata", showFrame);
   video.addEventListener("seeked", presentVideoFrame);
   showFrame();
-  loadVideoFrames().catch((error) => console.error(error));
 
-  const stopPlayback = () => {
+  const stopPlayback = ({ preserveReverse = false } = {}) => {
     playbackRevision += 1;
     window.clearInterval(timer);
     cancelAnimationFrame(videoAnimationFrame);
     video.pause();
+    cancelPlaybackWait?.();
+    if (!preserveReverse) discardReversePreparation();
     timer = 0;
     videoAnimationFrame = 0;
     isVideoAnimating = false;
@@ -174,62 +242,113 @@
     }
   };
 
-  const playVideoFrames = (revision) => {
-    loadVideoFrames().then(() => {
-      if (revision !== playbackRevision) {
+  const reportPlaybackError = (revision, error) => {
+    if (revision !== playbackRevision || error?.name === "AbortError") return;
+    stopPlayback();
+    status.textContent = "動画を再生できませんでした。";
+    status.hidden = false;
+    console.error(error);
+  };
+
+  const finishVideoPlayback = (frame) => {
+    stopPlayback();
+    currentFrame = frame;
+    targetFrame = frame;
+    isFinishingSelf = false;
+    isPlayingSelf = false;
+    showFrame();
+  };
+
+  const playVideoForward = (revision) => {
+    const wrapsToStart = isFinishingSelf || isPlayingSelf;
+    const draw = () => {
+      if (revision !== playbackRevision) return;
+      if (video.ended) {
+        finishVideoPlayback(wrapsToStart ? 0 : targetFrame);
         return;
       }
-      const firstFrame = currentFrame;
-      const direction = isFinishingSelf ? finishDirection : Math.sign(targetFrame - firstFrame) || 1;
-      const wrapsToStart = isPlayingSelf || (isFinishingSelf && direction > 0);
-      const distance = wrapsToStart ? 48 - firstFrame : Math.abs(targetFrame - firstFrame);
-      const lastFrame = wrapsToStart ? 0 : targetFrame;
-      const start = performance.now();
-      const draw = (now) => {
-        if (revision !== playbackRevision) {
+      if (video.readyState >= 2 && !video.seeking) {
+        const frame = Math.min(47, Math.floor(video.currentTime * videoFps));
+        if (!wrapsToStart && frame >= targetFrame) {
+          finishVideoPlayback(targetFrame);
           return;
         }
-        const steps = Math.min(distance, Math.floor((now - start) * videoFps / 1000));
-        const frame = (firstFrame + direction * steps + 48) % 48;
         if (frame !== currentFrame) {
           currentFrame = frame;
-          showFrame();
+          presentVideoFrame();
+        }
+      }
+      videoAnimationFrame = requestAnimationFrame(draw);
+    };
+    const cleanup = () => {
+      video.removeEventListener("seeked", start);
+      video.removeEventListener("loadeddata", start);
+      cancelPlaybackWait = undefined;
+    };
+    const start = () => {
+      if (revision !== playbackRevision) {
+        cleanup();
+      } else if (video.readyState >= 2 && !video.seeking) {
+        cleanup();
+        video.playbackRate = 1;
+        video.play().catch((error) => reportPlaybackError(revision, error));
+        videoAnimationFrame = requestAnimationFrame(draw);
+      }
+    };
+    showFrame();
+    cancelPlaybackWait = cleanup;
+    video.addEventListener("seeked", start);
+    video.addEventListener("loadeddata", start);
+    start();
+  };
+
+  const playVideoReverse = (revision) => {
+    const firstFrame = currentFrame;
+    const lastFrame = targetFrame;
+    prepareReverseFrames(firstFrame, lastFrame).then((preparation) => {
+      if (revision !== playbackRevision) return;
+      const start = performance.now();
+      const distance = firstFrame - lastFrame;
+      const draw = (now) => {
+        if (revision !== playbackRevision) return;
+        const steps = Math.min(distance, Math.floor((now - start) * videoFps / 1000));
+        const frame = firstFrame - steps;
+        if (frame !== currentFrame) {
+          currentFrame = frame;
+          presentFrame(preparation.frames.get(frame));
+          preparation.frames.forEach((image, index) => {
+            if (index > frame) {
+              image.width = 0;
+              image.height = 0;
+              preparation.frames.delete(index);
+            }
+          });
         }
         if (steps === distance) {
-          stopPlayback();
-          currentFrame = lastFrame;
-          targetFrame = lastFrame;
-          isFinishingSelf = false;
-          isPlayingSelf = false;
-          showFrame();
+          finishVideoPlayback(lastFrame);
           return;
         }
         videoAnimationFrame = requestAnimationFrame(draw);
       };
       presentVideoFrame();
       videoAnimationFrame = requestAnimationFrame(draw);
-    }).catch((error) => {
-      if (revision === playbackRevision) {
-        stopPlayback();
-        status.textContent = "動画を読み込めませんでした。";
-        status.hidden = false;
-      }
-      console.error(error);
-    });
+    }).catch((error) => reportPlaybackError(revision, error));
   };
 
   const playTo = (frame) => {
     if (isVideoAnimating && targetFrame === frame && !isPlayingSelf) {
       return;
     }
-    stopPlayback();
+    const backwards = !isPlayingSelf && (isFinishingSelf ? finishDirection < 0 : frame < currentFrame);
+    stopPlayback({ preserveReverse: backwards });
     targetFrame = frame;
     if (isPlayingSelf || currentFrame !== targetFrame) {
       if (isPlayingSelf && viewer) {
         timer = window.setInterval(advanceFrame, 1000 / viewer.fps);
       } else {
         isVideoAnimating = true;
-        playVideoFrames(playbackRevision);
+        if (backwards) playVideoReverse(playbackRevision);
+        else playVideoForward(playbackRevision);
       }
     }
   };
@@ -256,8 +375,22 @@
     playTo(0);
   };
 
+  const prepareVideoReturn = () => {
+    const lastFrame = shouldHoldOtherFrame ? otherHoverFrame : 0;
+    const backwards = shouldHoldOtherFrame ? currentFrame > lastFrame
+      : currentFrame > 0 && currentFrame <= 48 - currentFrame;
+    if (backwards) {
+      prepareReverseFrames(currentFrame, lastFrame).catch((error) => {
+        if (error?.name !== "AbortError") console.error(error);
+      });
+    } else {
+      discardReversePreparation();
+    }
+  };
+
   const returnViewerToFront = () => {
     if (isReturningToFront) {
+      prepareVideoReturn();
       return true;
     }
     if (!viewer || canvas.hidden) {
@@ -271,6 +404,7 @@
     isReturningToFront = true;
     status.hidden = true;
     showFrame();
+    prepareVideoReturn();
     viewer.resetCamera().then((complete) => {
       if (!complete || activation !== viewerActivation) {
         return;

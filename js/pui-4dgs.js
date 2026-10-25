@@ -20,6 +20,60 @@
     return scenePromise;
   };
 
+  const sortSplatFrames = () => {
+    const counts = new Uint32Array(65536);
+    const offsets = new Uint32Array(65536);
+    let depths = new Float32Array(0);
+    let bins = new Uint16Array(0);
+
+    self.onmessage = ({ data }) => {
+      const { values, count, planes, depthBoundsPositions } = data;
+      if (depths.length !== count) {
+        depths = new Float32Array(count);
+        bins = new Uint16Array(count);
+      }
+      let minimum = Infinity;
+      let maximum = -Infinity;
+      for (let point = 0; point < count; point++) {
+        const offset = point * 12;
+        const depth = planes[0] * values[offset] + planes[1] * values[offset + 1]
+          + planes[2] * values[offset + 2] + planes[3];
+        depths[point] = depth;
+        minimum = Math.min(minimum, depth);
+        maximum = Math.max(maximum, depth);
+      }
+      if (depthBoundsPositions?.length) {
+        minimum = Infinity;
+        maximum = -Infinity;
+        for (let offset = 0; offset < depthBoundsPositions.length; offset += 3) {
+          const depth = planes[0] * depthBoundsPositions[offset]
+            + planes[1] * depthBoundsPositions[offset + 1]
+            + planes[2] * depthBoundsPositions[offset + 2] + planes[3];
+          minimum = Math.min(minimum, depth);
+          maximum = Math.max(maximum, depth);
+        }
+      }
+      counts.fill(0);
+      const multiplier = 65535 / Math.max(maximum - minimum, 1e-8);
+      for (let point = 0; point < count; point++) {
+        const bin = Math.max(0, Math.min(65535, Math.floor((depths[point] - minimum) * multiplier)));
+        bins[point] = bin;
+        counts[bin] += 1;
+      }
+      let total = 0;
+      for (let bin = 65535; bin >= 0; bin--) {
+        offsets[bin] = total;
+        total += counts[bin];
+      }
+      const order = new Uint32Array(count);
+      for (let point = 0; point < count; point++) {
+        order[offsets[bins[point]]++] = point;
+      }
+      self.postMessage({ values, order, frame: data.frame, revision: data.revision },
+        [values.buffer, order.buffer]);
+    };
+  };
+
   window.createPuiGs = async (canvas, {
     interactionElement = canvas,
     onDraw,
@@ -136,7 +190,6 @@
     );
     const textureWidth = Math.min(2048, gl.getParameter(gl.MAX_TEXTURE_SIZE));
     const textureHeight = Math.ceil(config.maxCount * 3 / textureWidth);
-    const textureValues = new Float32Array(textureWidth * textureHeight * 4);
     const texture = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -204,10 +257,10 @@
     const uploadFrame = (index, order) => {
       const frame = config.frames[index];
       const height = Math.ceil(frame.count * 3 / textureWidth);
-      textureValues.set(cache.get(frame.url).values);
+      const values = cache.get(frame.url).values;
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, height, gl.RGBA, gl.FLOAT,
-        textureValues.subarray(0, textureWidth * height * 4));
+        values.subarray(0, textureWidth * height * 4));
       gl.bindBuffer(gl.ARRAY_BUFFER, indexBuffer);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, order);
       activeFrame = index;
@@ -256,12 +309,13 @@
         if (!sortBusy && payload && (requestedFrame !== activeFrame || sortedRevision !== viewRevision)) {
           const camera = cameraState(frame);
           worker.postMessage({
-            positions: payload.positions,
+            values: payload.values,
+            count: frame.count,
             depthBoundsPositions: depthBounds.get(frame.url),
             planes: [...camera.forward, -dot(camera.forward, camera.position)],
             frame: requestedFrame,
             revision: viewRevision
-          });
+          }, [payload.values.buffer]);
           sortBusy = true;
         }
 
@@ -466,7 +520,8 @@
         throw new Error("4DGSデータの設定が一致しません。");
       }
 
-      const values = Array.from({ length: header.frameCount }, () => new Float32Array(header.count * 12));
+      const valueCount = textureWidth * Math.ceil(header.count * 3 / textureWidth) * 4;
+      const values = Array.from({ length: header.frameCount }, () => new Float32Array(valueCount));
       const columns = [0, 1, 2, 4, 5, 6, 8, 9, 10, 11, 7];
       let offset = 12 + headerLength;
       for (let channel = 0; channel < header.channels.length; channel++) {
@@ -532,16 +587,14 @@
 
       for (let frame = 0; frame < header.frameCount; frame++) {
         const rows = values[frame];
-        const positions = new Float32Array(header.count * 3);
         for (let point = 0; point < header.count; point++) {
           const start = point * 12;
           const norm = Math.hypot(rows[start + 8], rows[start + 9], rows[start + 10], rows[start + 11]);
           if (norm > 0) {
             for (let axis = 8; axis < 12; axis++) rows[start + axis] /= norm;
           }
-          positions.set(rows.subarray(start, start + 3), point * 3);
         }
-        cache.set(config.frames[frame].url, { values: rows, positions });
+        cache.set(config.frames[frame].url, { values: rows });
       }
     };
 
@@ -634,11 +687,12 @@
       fail(new Error("4DGSの描画コンテキストが失われました。"));
     });
 
-    const workerUrl = URL.createObjectURL(new Blob([scene.sortWorker], { type: "text/javascript" }));
+    const workerUrl = URL.createObjectURL(new Blob([`(${sortSplatFrames.toString()})();`], { type: "text/javascript" }));
     worker = new Worker(workerUrl);
     URL.revokeObjectURL(workerUrl);
     worker.onerror = (event) => fail(new Error(event.message));
     worker.onmessage = ({ data }) => {
+      cache.get(config.frames[data.frame].url).values = data.values;
       sortBusy = false;
       if (failed || data.revision !== viewRevision
         || ((cameraReset || framePreparation) && data.frame !== requestedFrame)) return;
