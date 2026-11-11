@@ -15,6 +15,10 @@
   ambientFrame.width = ambientCanvas.width;
   ambientFrame.height = ambientCanvas.height;
   const ambientFrameContext = ambientFrame.getContext("2d");
+  const ambientTarget = document.createElement("canvas");
+  ambientTarget.width = ambientFrame.width;
+  ambientTarget.height = ambientFrame.height;
+  const ambientTargetContext = ambientTarget.getContext("2d");
   const paperColor = getComputedStyle(document.body).backgroundColor;
 
   const tau = Math.PI * 2;
@@ -31,7 +35,9 @@
     vhsStrength: 1,
     idleVhsStrength: 0.35,
     lensDistortion: 0.1,
-    vignetteStrength: 0.6
+    vignetteStrength: 0.6,
+    ambientOpacity: 0.4,
+    ambientColorResponse: 160
   };
   const frames = [];
   const cache = new Map();
@@ -58,6 +64,8 @@
   let animationFrame = 0;
   let ambientLayoutFrame = 0;
   let ambientFramePosition;
+  let ambientBlendUntil = 0;
+  let lastAmbientBlendAt = 0;
   let isHovered = false;
   let isTouchActive = false;
   let isAmbientVisible = false;
@@ -730,38 +738,55 @@
     context.save();
     context.fillStyle = paperColor;
     context.fillRect(0, 0, width, height);
-    context.globalAlpha = 0.55;
+    context.globalAlpha = effects.ambientOpacity;
     context.filter = "blur(40px)";
     context.drawImage(ambientCanvas, -padding, -padding, paddedWidth, paddedHeight);
     context.restore();
   }
 
   function captureAmbientFrame(position, source, next) {
-    if (!ambientFrameContext) return;
+    if (!ambientTargetContext) return;
 
-    const {width, height} = ambientFrame;
-    ambientFrameContext.clearRect(0, 0, width, height);
-    ambientFrameContext.drawImage(source, 0, 0, width, height);
+    const {width, height} = ambientTarget;
+    ambientTargetContext.clearRect(0, 0, width, height);
+    ambientTargetContext.drawImage(source, 0, 0, width, height);
     const phase = position - Math.floor(position);
     if (phase && next) {
-      ambientFrameContext.save();
-      ambientFrameContext.globalAlpha = phase;
-      ambientFrameContext.drawImage(next, 0, 0, width, height);
-      ambientFrameContext.restore();
+      ambientTargetContext.save();
+      ambientTargetContext.globalAlpha = phase;
+      ambientTargetContext.drawImage(next, 0, 0, width, height);
+      ambientTargetContext.restore();
     }
     ambientFramePosition = position;
   }
 
   function updateAmbient() {
-    if (!ambientContext || !ambientFrameContext || canvas.hidden) return;
+    if (!ambientContext || !ambientFrameContext || !ambientTargetContext || canvas.hidden) return;
 
+    const now = performance.now();
     const position = ready ? angleFrame() : 0;
     if (ready && position !== ambientFramePosition) {
       const first = Math.floor(position);
       captureAmbientFrame(position, colors[first], colors[(first + 1) % frameCount]);
-    } else if (ambientFramePosition === undefined || isAmbientVisible) {
-      return;
+      if (now >= ambientBlendUntil) lastAmbientBlendAt = now;
+      ambientBlendUntil = now + 4 * effects.ambientColorResponse;
     }
+    if (ambientFramePosition === undefined || (isAmbientVisible && !ambientBlendUntil)) return;
+
+    const amount = !isAmbientVisible || now >= ambientBlendUntil
+      ? 1
+      : 1 - Math.exp(-(now - lastAmbientBlendAt) / effects.ambientColorResponse);
+    if (amount === 0) return;
+    lastAmbientBlendAt = now;
+    if (amount === 1) {
+      ambientBlendUntil = 0;
+      ambientFrameContext.clearRect(0, 0, ambientFrame.width, ambientFrame.height);
+    }
+    ambientFrameContext.save();
+    ambientFrameContext.globalAlpha = amount;
+    ambientFrameContext.drawImage(ambientTarget, 0, 0);
+    ambientFrameContext.restore();
+
     if (!isAmbientVisible) {
       window.galleryEffects?.activate("sabotage");
       isAmbientVisible = true;
@@ -773,6 +798,7 @@
     if (!isAmbientVisible) return;
 
     isAmbientVisible = false;
+    ambientBlendUntil = 0;
     window.siteBackgroundEffects?.releaseBackground(drawAmbient, restoreGrid);
   }
 
@@ -801,7 +827,7 @@
       presentView(effectsActive);
       if (canvas.hidden) canvas.hidden = false;
       if (isLoadingAnimation) setAnimationLoading(false);
-      if (effectsActive && viewChanged) updateAmbient();
+      if (effectsActive && (viewChanged || ambientBlendUntil)) updateAmbient();
       if (effectsActive || chromaticStrength > 0) requestRender();
     } catch (error) {
       fail(error);
