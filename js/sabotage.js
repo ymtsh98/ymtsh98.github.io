@@ -10,15 +10,16 @@
   const ambientCanvas = document.createElement("canvas");
   ambientCanvas.width = 64;
   ambientCanvas.height = 64;
-  const ambientContext = ambientCanvas.getContext("2d", {alpha: false});
+  const ambientContext = ambientCanvas.getContext("2d");
   const ambientFrame = document.createElement("canvas");
   ambientFrame.width = ambientCanvas.width;
   ambientFrame.height = ambientCanvas.height;
-  const ambientFrameContext = ambientFrame.getContext("2d", {alpha: false});
+  const ambientFrameContext = ambientFrame.getContext("2d");
   const paperColor = getComputedStyle(document.body).backgroundColor;
 
   const tau = Math.PI * 2;
   const frameCount = 120;
+  const colorFrameDuration = 1000000 / 48;
   const imageWidth = 640;
   const imageHeight = 1152;
   const depthWidth = 160;
@@ -48,6 +49,7 @@
   let splatVao;
   let framebuffer;
   let accumulation;
+  let useFloatAccumulation;
   let accumulationWidth = 0;
   let accumulationHeight = 0;
   let chromaticStrength = 0;
@@ -55,8 +57,11 @@
   let lastMotionAt = -Infinity;
   let animationFrame = 0;
   let ambientLayoutFrame = 0;
+  let ambientFramePosition;
   let isHovered = false;
+  let isTouchActive = false;
   let isAmbientVisible = false;
+  let touchStart;
   let drag;
   let animationLoad;
   let isLoadingAnimation = false;
@@ -157,9 +162,10 @@
   precision highp float;
   in vec2 gaussianPosition;
   flat in vec4 gaussianColor;
+  uniform float accumulationScale;
   out vec4 outputColor;
   void main() {
-    float weight = gaussianColor.a * exp(-0.5 * dot(gaussianPosition, gaussianPosition));
+    float weight = accumulationScale * gaussianColor.a * exp(-0.5 * dot(gaussianPosition, gaussianPosition));
     outputColor = vec4(gaussianColor.rgb * weight, weight);
   }
   `;
@@ -223,13 +229,18 @@
       float headSwitch = 1.0 - smoothstep(0.0, 0.022, uv.y);
       signalUv.x += (jitter + tear + headSwitch * sin(line * 0.7 + field) * 0.008) * vhsStrength;
     }
-    vec3 color = resolvedColor(signalUv);
+    vec4 signal = sampleView(signalUv);
+    if (signal.a <= 0.001) {
+      outputColor = vec4(0.0);
+      return;
+    }
+    vec3 color = signal.rgb / signal.a;
     if (chromaticStrength > 0.0) {
       vec2 offset = (uv - 0.5) * 0.012 * chromaticStrength;
       color.r = resolvedColor(signalUv + offset).r;
       color.b = resolvedColor(signalUv - offset).b;
     }
-    if (vhsStrength > 0.0 && sampleView(signalUv).a > 0.001) {
+    if (vhsStrength > 0.0) {
       vec3 lumaWeights = vec3(0.299, 0.587, 0.114);
       vec2 chromaOffset = vec2(2.5 / 720.0, 0.0);
       vec3 bleed = resolvedColor(signalUv - chromaOffset) * 0.5;
@@ -263,6 +274,7 @@
       canvas.hidden = true;
       stopAmbient(true);
     }
+    setTouchActive(false);
     console.error(error);
   }
 
@@ -346,18 +358,22 @@
   async function copyColorFrame(frame) {
     try {
       if (frame.format === null) return await createImageBitmap(frame);
-      const bytes = new Uint8Array(frame.allocationSize());
-      const layout = await frame.copyTo(bytes);
-      return new VideoFrame(bytes, {
-        format: frame.format,
-        codedWidth: frame.visibleRect.width,
-        codedHeight: frame.visibleRect.height,
-        displayWidth: frame.displayWidth,
-        displayHeight: frame.displayHeight,
-        colorSpace: frame.colorSpace.toJSON(),
-        timestamp: frame.timestamp,
-        layout
-      });
+      try {
+        const bytes = new Uint8Array(frame.allocationSize());
+        const layout = await frame.copyTo(bytes);
+        return new VideoFrame(bytes, {
+          format: frame.format,
+          codedWidth: frame.visibleRect.width,
+          codedHeight: frame.visibleRect.height,
+          displayWidth: frame.displayWidth,
+          displayHeight: frame.displayHeight,
+          colorSpace: frame.colorSpace.toJSON(),
+          timestamp: frame.timestamp,
+          layout
+        });
+      } catch {
+        return await createImageBitmap(frame);
+      }
     } finally {
       frame.close();
     }
@@ -367,12 +383,14 @@
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     let offset = 0;
     while (offset < bytes.length) {
-      const timestamp = view.getUint32(offset, true);
+      const index = view.getUint32(offset, true);
       const size = view.getUint32(offset + 4, true);
       const type = bytes[offset + 8] === 1 ? "key" : "delta";
       offset += 9;
       if (offset + size > bytes.length) throw new Error("画像データが途中で終わっています。");
-      decoder.decode(new EncodedVideoChunk({type, timestamp, data: bytes.subarray(offset, offset + size)}));
+      const timestamp = Math.round(index * colorFrameDuration);
+      const duration = Math.round((index + 1) * colorFrameDuration) - timestamp;
+      decoder.decode(new EncodedVideoChunk({type, timestamp, duration, data: bytes.subarray(offset, offset + size)}));
       offset += size;
     }
   }
@@ -394,7 +412,7 @@
     let failure;
     const decoder = new VideoDecoder({
       output(frame) {
-        const index = frame.timestamp;
+        const index = Math.round(frame.timestamp / colorFrameDuration);
         const copy = copyColorFrame(frame).then(color => {
           colors[index] = color;
         }).catch(error => {
@@ -418,6 +436,11 @@
         if (!colors[index]) throw new Error("画像のコマ数が一致しません。");
       }
       return colors;
+    } catch (error) {
+      if (decoder.state !== "closed") decoder.close();
+      await Promise.all(copies);
+      colors.forEach(color => color.close());
+      throw error;
     } finally {
       if (decoder.state !== "closed") decoder.close();
     }
@@ -437,7 +460,8 @@
           presentView(false, source);
           showingFirstFrame = true;
           canvas.hidden = false;
-          if (isHovered || drag) updateAmbient();
+          captureAmbientFrame(0, frame);
+          if (effectsAreActive()) updateAmbient();
         } finally {
           gl.deleteTexture(source);
         }
@@ -495,7 +519,7 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, gl.RGB, gl.UNSIGNED_BYTE, frame);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, frame);
     return color;
   }
 
@@ -532,7 +556,9 @@
     canvas.width = width;
     canvas.height = height;
     if (accumulation) gl.deleteTexture(accumulation);
-    accumulation = texture(gl.RGBA16F, width, height, gl.RGBA, gl.HALF_FLOAT, null);
+    const format = useFloatAccumulation ? gl.RGBA16F : gl.RGBA8;
+    const type = useFloatAccumulation ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+    accumulation = texture(format, width, height, gl.RGBA, type, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, accumulation, 0);
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error("描画バッファを作成できませんでした。");
@@ -572,6 +598,7 @@
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.useProgram(splatProgram);
     gl.bindVertexArray(splatVao);
+    gl.uniform1f(splatUniforms.accumulationScale, useFloatAccumulation ? 1 : 0.25);
     const offset = [Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch), Math.cos(pitch) * Math.cos(yaw)];
     const forward = offset.map(value => -value);
     const right = [Math.cos(yaw), 0, -Math.sin(yaw)];
@@ -687,6 +714,7 @@
       (imageBounds.top + padding) * scaleY, (imageBounds.bottom + padding) * scaleY, insetRatio
     );
 
+    ambientContext.clearRect(0, 0, ambientCanvas.width, ambientCanvas.height);
     for (const row of rows) {
       for (const column of columns) {
         if (column.targetSize <= 0 || row.targetSize <= 0) continue;
@@ -708,10 +736,32 @@
     context.restore();
   }
 
+  function captureAmbientFrame(position, source, next) {
+    if (!ambientFrameContext) return;
+
+    const {width, height} = ambientFrame;
+    ambientFrameContext.clearRect(0, 0, width, height);
+    ambientFrameContext.drawImage(source, 0, 0, width, height);
+    const phase = position - Math.floor(position);
+    if (phase && next) {
+      ambientFrameContext.save();
+      ambientFrameContext.globalAlpha = phase;
+      ambientFrameContext.drawImage(next, 0, 0, width, height);
+      ambientFrameContext.restore();
+    }
+    ambientFramePosition = position;
+  }
+
   function updateAmbient() {
     if (!ambientContext || !ambientFrameContext || canvas.hidden) return;
 
-    ambientFrameContext.drawImage(canvas, 0, 0, ambientFrame.width, ambientFrame.height);
+    const position = ready ? angleFrame() : 0;
+    if (ready && position !== ambientFramePosition) {
+      const first = Math.floor(position);
+      captureAmbientFrame(position, colors[first], colors[(first + 1) % frameCount]);
+    } else if (ambientFramePosition === undefined || isAmbientVisible) {
+      return;
+    }
     if (!isAmbientVisible) {
       window.galleryEffects?.activate("sabotage");
       isAmbientVisible = true;
@@ -747,7 +797,7 @@
         renderView();
         dirty = false;
       }
-      const effectsActive = isHovered || Boolean(drag);
+      const effectsActive = effectsAreActive();
       presentView(effectsActive);
       if (canvas.hidden) canvas.hidden = false;
       if (isLoadingAnimation) setAnimationLoading(false);
@@ -758,8 +808,12 @@
     }
   }
 
+  function effectsAreActive() {
+    return isHovered || isTouchActive || Boolean(drag);
+  }
+
   function updateInteraction(target) {
-    if (isHovered || drag) {
+    if (effectsAreActive()) {
       if (!isAmbientVisible) updateAmbient();
     } else {
       const nextTile = target?.closest?.(".gallery > .tile:not(.sabotageTile)");
@@ -773,11 +827,26 @@
 
     isHovered = hovered;
     if (hovered) preloadAnimation("high");
-    loadingStatus.hidden = !isHovered || !isLoadingAnimation;
+    updateLoadingStatus();
+    updateInteraction(target);
+  }
+
+  function setTouchActive(active, target) {
+    if (isTouchActive === active) return;
+
+    isTouchActive = active;
+    media.classList.toggle("isTouchActive", active && ready);
+    if (active) preloadAnimation("high");
+    updateLoadingStatus();
     updateInteraction(target);
   }
 
   window.addEventListener("scroll", scheduleAmbientLayout, {passive: true});
+  document.addEventListener("pointerdown", event => {
+    if (event.pointerType === "touch" && event.isPrimary && !media.contains(event.target)) {
+      setTouchActive(false, event.target);
+    }
+  });
 
   media.addEventListener("pointerenter", event => {
     if (event.pointerType !== "touch") setHovered(true);
@@ -787,7 +856,16 @@
   });
 
   media.addEventListener("pointerdown", event => {
-    if (event.button !== 0 || event.pointerType === "touch" || !ready) return;
+    if (event.pointerType === "touch") {
+      if (!event.isPrimary || drag) return;
+
+      if (!isTouchActive) {
+        touchStart = {id: event.pointerId, x: event.clientX, y: event.clientY};
+        return;
+      }
+    }
+
+    if (event.button !== 0 || !ready) return;
 
     event.preventDefault();
     drag = {id: event.pointerId, x: event.clientX, y: event.clientY};
@@ -796,10 +874,17 @@
   });
 
   media.addEventListener("pointermove", event => {
-    if (drag?.id !== event.pointerId || !(event.buttons & 1)) return;
+    if (touchStart?.id === event.pointerId) {
+      if (Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y) > 8) touchStart = undefined;
+      return;
+    }
 
-    const {left, right, top, bottom} = media.getBoundingClientRect();
-    setHovered(event.clientX >= left && event.clientX < right && event.clientY >= top && event.clientY < bottom);
+    if (!ready || drag?.id !== event.pointerId || (event.pointerType !== "touch" && !(event.buttons & 1))) return;
+
+    if (event.pointerType !== "touch") {
+      const {left, right, top, bottom} = media.getBoundingClientRect();
+      setHovered(event.clientX >= left && event.clientX < right && event.clientY >= top && event.clientY < bottom);
+    }
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
     drag.x = event.clientX;
@@ -809,11 +894,16 @@
 
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
     media.addEventListener(type, event => {
+      if (touchStart?.id === event.pointerId) {
+        const distance = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
+        touchStart = undefined;
+        if (type === "pointerup" && distance <= 8) setTouchActive(true);
+      }
       if (drag?.id !== event.pointerId) return;
 
       drag = undefined;
       const target = type === "pointerup" ? document.elementFromPoint(event.clientX, event.clientY) : null;
-      if (type === "pointerup") isHovered = media.contains(target);
+      if (type === "pointerup" && event.pointerType !== "touch") isHovered = media.contains(target);
       updateInteraction(target);
     });
   }
@@ -835,7 +925,7 @@
   function initializeDisplay() {
     if (resolveProgram) return;
 
-    gl = canvas.getContext("webgl2", {alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true});
+    gl = canvas.getContext("webgl2", {alpha: true, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true});
     if (!gl) throw new Error("WebGL 2に対応したブラウザで開いてください。");
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     resolveProgram = program(resolveVertex, resolveFragment);
@@ -844,9 +934,9 @@
 
   async function initialize(data) {
     initializeDisplay();
-    if (!gl.getExtension("EXT_color_buffer_float")) throw new Error("浮動小数点の描画バッファに対応したGPUが必要です。");
+    useFloatAccumulation = Boolean(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
     splatProgram = program(splatVertex, splatFragment);
-    const names = ["sourceColor", "otherColor", "sourceDepth", "otherDepth", "sourceFlow", "otherFlow", "imageSize", "viewport", "sourceAngle", "otherAngle", "phase", "angularWeight", "focalLength", "screenFocal", "cameraPosition", "viewRotation", "reverseFlow"];
+    const names = ["sourceColor", "otherColor", "sourceDepth", "otherDepth", "sourceFlow", "otherFlow", "imageSize", "viewport", "sourceAngle", "otherAngle", "phase", "angularWeight", "focalLength", "screenFocal", "cameraPosition", "viewRotation", "reverseFlow", "accumulationScale"];
     splatUniforms = Object.fromEntries(names.map(name => [name, gl.getUniformLocation(splatProgram, name)]));
     splatVao = gl.createVertexArray();
     gl.bindVertexArray(splatVao);
@@ -859,6 +949,7 @@
     framebuffer = gl.createFramebuffer();
     [colors] = await Promise.all([preloadColors(data.color), preloadFrames(data.geometry)]);
     ready = true;
+    media.classList.toggle("isTouchActive", isTouchActive);
     new ResizeObserver(requestRender).observe(media);
     requestRender();
   }
@@ -893,13 +984,18 @@
     animationLoad = loadAnimationData(priority).then(initialize, error => {
       animationLoad = undefined;
       setAnimationLoading(false);
+      setTouchActive(false);
       console.error(error);
     }).catch(fail);
   }
 
   function setAnimationLoading(loading) {
     isLoadingAnimation = loading;
-    loadingStatus.hidden = !isHovered || !isLoadingAnimation;
+    updateLoadingStatus();
+  }
+
+  function updateLoadingStatus() {
+    loadingStatus.hidden = !isLoadingAnimation || !(isHovered || isTouchActive);
   }
 
   function scheduleAnimationPreload() {

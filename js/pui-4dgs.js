@@ -619,7 +619,7 @@
       if (active && !canvas.hidden) event.preventDefault();
     });
     interactionElement.addEventListener("pointerdown", (event) => {
-      if (!active || canvas.hidden || (event.pointerType === "mouse" && event.button !== 0 && event.button !== 2)) {
+      if (!active || canvas.hidden || (event.pointerType === "mouse" && event.button !== 0 && event.button !== 1 && event.button !== 2)) {
         return;
       }
       event.preventDefault();
@@ -641,7 +641,7 @@
       const deltaX = event.clientX - previous.x;
       const deltaY = event.clientY - previous.y;
       pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (event.pointerType === "mouse" && (event.buttons & 2)) {
+      if (event.pointerType === "mouse" && (event.buttons & (2 | 4))) {
         trackCamera(deltaX, deltaY);
       } else if (pointers.size === 2) {
         const other = [...pointers.entries()].find(([id]) => id !== event.pointerId)[1];

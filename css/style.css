@@ -531,9 +531,12 @@ a {
 .sabotage {
   aspect-ratio: 640 / 1152;
   overflow: hidden;
-  background: #101116;
   cursor: grab;
-  touch-action: pan-y;
+  touch-action: manipulation;
+}
+
+.sabotage.isTouchActive {
+  touch-action: none;
 }
 
 .sabotage:active {

@@ -25,7 +25,7 @@
 
   const videoFps = 48;
   const otherHoverFrame = 22;
-  const rendererUrl = new URL("pui-4dgs.js?v=20261025-13", document.currentScript.src).href;
+  const rendererUrl = new URL("pui-4dgs.js?v=20261111-2", document.currentScript.src).href;
   const canUseHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   let currentFrame = 0;
   let targetFrame = 0;
@@ -39,8 +39,6 @@
   let shouldHoldOtherFrame = false;
   let isSelected = false;
   let isPlayingSelf = false;
-  let isFinishingSelf = false;
-  let finishDirection = 1;
   let lastTouchActivation = Number.NEGATIVE_INFINITY;
   let viewer;
   let viewerPromise;
@@ -280,13 +278,12 @@
     stopPlayback();
     currentFrame = frame;
     targetFrame = frame;
-    isFinishingSelf = false;
     isPlayingSelf = false;
     showFrame();
   };
 
   const playVideoForward = (revision) => {
-    const wrapsToStart = isFinishingSelf || isPlayingSelf;
+    const wrapsToStart = isPlayingSelf;
     const firstFrame = currentFrame;
     let positioned = false;
     const draw = () => {
@@ -369,7 +366,7 @@
     if (isVideoAnimating && targetFrame === frame && !isPlayingSelf) {
       return;
     }
-    const backwards = !isPlayingSelf && (isFinishingSelf ? finishDirection < 0 : frame < currentFrame);
+    const backwards = !isPlayingSelf && frame < currentFrame;
     stopPlayback({ preserveReverse: backwards });
     targetFrame = frame;
     if (isPlayingSelf || currentFrame !== targetFrame) {
@@ -396,21 +393,15 @@
 
   const finishWithVideo = () => {
     if (shouldHoldOtherFrame) {
-      isFinishingSelf = false;
       playTo(otherHoverFrame);
       return;
     }
-    isFinishingSelf = currentFrame !== 0;
-    finishDirection = currentFrame <= 48 - currentFrame ? -1 : 1;
-    playTo(0);
+    finishVideoPlayback(currentFrame);
   };
 
   const prepareVideoReturn = () => {
-    const lastFrame = shouldHoldOtherFrame ? otherHoverFrame : 0;
-    const backwards = shouldHoldOtherFrame ? currentFrame > lastFrame
-      : currentFrame > 0 && currentFrame <= 48 - currentFrame;
-    if (backwards) {
-      prepareReverseFrames(currentFrame, lastFrame).catch((error) => {
+    if (shouldHoldOtherFrame && currentFrame > otherHoverFrame) {
+      prepareReverseFrames(currentFrame, otherHoverFrame).catch((error) => {
         if (error?.name !== "AbortError") console.error(error);
       });
     } else {
@@ -558,7 +549,6 @@
     if (returnViewerToFront()) {
       return;
     }
-    isFinishingSelf = false;
     playTo(otherHoverFrame);
   };
 
@@ -580,7 +570,6 @@
     canvas.hidden = true;
     media.classList.remove("isViewerActive");
     isReturningToFront = false;
-    isFinishingSelf = false;
     isOtherImageSelected = false;
     shouldHoldOtherFrame = false;
     isSelected = true;
