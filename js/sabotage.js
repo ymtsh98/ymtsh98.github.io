@@ -915,7 +915,8 @@
     const dy = event.clientY - drag.y;
     drag.x = event.clientX;
     drag.y = event.clientY;
-    moveView(yaw - dx * tau / media.clientWidth, pitch + dy * Math.PI / media.clientHeight);
+    const horizontalScale = event.pointerType === "touch" ? 1.15 : 1;
+    moveView(yaw - horizontalScale * dx * tau / media.clientWidth, pitch + dy * Math.PI / media.clientHeight);
   });
 
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
