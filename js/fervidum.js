@@ -19,6 +19,7 @@ const maxSimulationSide = 176;
 
 let backgroundCanvas;
 let backgroundContext;
+let backgroundPainter;
 let inkCanvas;
 let inkContext;
 let inkImageData;
@@ -284,13 +285,18 @@ const scheduleBackgroundResize = () => {
 
     if (
       !backgroundCanvas.classList.contains("is-active") ||
-      backgroundCanvas.classList.contains("is-restoring")
+      backgroundCanvas.classList.contains("is-restoring") ||
+      backgroundCanvas.classList.contains("is-effect-fading")
     ) {
       return;
     }
 
     if (resizeBackgroundCanvas()) {
-      renderFervidumSweep(fervidumSweepProgress);
+      if (backgroundPainter) {
+        backgroundPainter(backgroundContext, getBackgroundViewportSize());
+      } else {
+        renderFervidumSweep(fervidumSweepProgress);
+      }
     }
   });
 };
@@ -336,6 +342,7 @@ const clearBackgroundCanvas = () => {
 };
 
 const finishBackgroundTransition = () => {
+  backgroundPainter = undefined;
   cancelAnimationFrame(backgroundFrame);
   stopWave();
   cancelGridRewrite?.();
@@ -355,6 +362,7 @@ const finishBackgroundTransition = () => {
 const startGridRestore = () => {
   const { width, height } = getBackgroundViewportSize();
 
+  backgroundPainter = undefined;
   cancelAnimationFrame(backgroundFrame);
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
@@ -409,6 +417,7 @@ const fadeOutEffect = () => {
     return;
   }
 
+  backgroundPainter = undefined;
   cancelAnimationFrame(backgroundFrame);
   cancelGridRewrite?.();
   cancelGridRewrite = undefined;
@@ -419,9 +428,34 @@ const fadeOutEffect = () => {
   restoreFadeTimer = window.setTimeout(finishBackgroundTransition, restoreFadeDuration);
 };
 
+const paintBackground = (draw) => {
+  createBackgroundCanvas();
+
+  if (backgroundPainter !== draw) {
+    finishBackgroundTransition();
+    backgroundPainter = draw;
+    backgroundCanvas.classList.add("is-active");
+  }
+
+  resizeBackgroundCanvas();
+  draw(backgroundContext, getBackgroundViewportSize());
+};
+
+const releaseBackground = (draw, restoreGrid) => {
+  if (backgroundPainter !== draw) return;
+
+  if (restoreGrid) {
+    startGridRestore();
+  } else {
+    fadeOutEffect();
+  }
+};
+
 window.siteBackgroundEffects = {
   cancelGridRestore,
   fadeOutEffect,
+  paintBackground,
+  releaseBackground,
   restoreGridFromColor,
   restoreGridFromTransparent
 };
@@ -826,6 +860,7 @@ const createWaveLayers = () => {
 
 const startFervidum = (includeSweep = true) => {
   window.galleryEffects?.activate("fervidum");
+  backgroundPainter = undefined;
   cancelGridRewrite?.();
   clearTimeout(restoreFadeTimer);
   backgroundCanvas.classList.remove("is-active", "is-restoring", "is-fading", "is-effect-fading");

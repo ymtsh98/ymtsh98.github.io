@@ -489,9 +489,6 @@ a {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-areas:
-    "feature wide-one"
-    "feature wide-two";
   grid-template-columns: var(
     --image-gallery-columns,
     minmax(0, 1fr) minmax(0, 1fr)
@@ -505,7 +502,6 @@ a {
 
 .blogGallery {
   --gallery-gap: clamp(14px, 1.8vw, 22px);
-  grid-template-areas: none;
   grid-template-columns: minmax(0, 1fr);
   grid-auto-rows: auto;
   align-items: start;
@@ -521,23 +517,6 @@ a {
   background: transparent;
 }
 
-.tile:nth-child(1) {
-  grid-area: feature;
-  transform: translateY(clamp(8px, 1.2vw, 16px));
-}
-
-.tile:nth-child(2) {
-  grid-area: wide-one;
-}
-
-.tile:nth-child(3) {
-  grid-area: wide-two;
-  transform: translate(
-    clamp(12px, 1.6vw, 22px),
-    clamp(8px, 1vw, 14px)
-  );
-}
-
 .tile::before {
   z-index: 3;
 }
@@ -547,6 +526,26 @@ a {
   display: block;
   width: 100%;
   height: auto;
+}
+
+.sabotage {
+  aspect-ratio: 640 / 1152;
+  overflow: hidden;
+  background: #101116;
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.sabotage:active {
+  cursor: grabbing;
+}
+
+.sabotage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .photoNote {
@@ -571,17 +570,10 @@ a {
 @media (max-width: 760px) {
   .gallery {
     --gallery-gap: 36px;
-    grid-template-areas: none;
     grid-template-columns: minmax(0, 1fr);
     gap: var(--gallery-gap);
     max-width: 560px;
   }
-
-  .tile:nth-child(n) {
-    grid-area: auto;
-    transform: none;
-  }
-
 }
 
 @media (max-width: 600px) {
