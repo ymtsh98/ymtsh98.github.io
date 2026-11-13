@@ -62,14 +62,17 @@ canvas {
   position: relative;
 }
 
+.fervidumMedia,
 .fervidumWarpHost {
   position: relative;
 }
 
+.fervidum {
+  aspect-ratio: 9 / 16;
+  object-fit: fill;
+}
+
 .fervidumSource {
-  position: relative;
-  z-index: 1;
-  opacity: 1;
   touch-action: manipulation;
 }
 
@@ -90,10 +93,10 @@ canvas {
   will-change: opacity;
 }
 
-body.fervidumWarpActive .fervidumSource {
-  opacity: 0;
+body.fervidumWarpActive .fervidumWave {
+  opacity: 1;
 }
 
-body.fervidumWarpActive .fervidumWave {
+.fervidumWave.is-rendered {
   opacity: 1;
 }

@@ -405,12 +405,9 @@ test("the touch sweep repaints to cover a viewport that expands while scrolling"
   assert.ok(sweep.context2d.fills.at(-1) > 0);
 });
 
-test("the active haze displays one image surface at a time", () => {
-  assert.match(
-    styles,
-    /body\.fervidumWarpActive\s+\.fervidumSource\s*\{[^}]*opacity\s*:\s*0/s
-  );
+test("the haze canvas stays visible when it renders the video", () => {
   assert.match(styles, /body\.fervidumWarpActive\s+\.fervidumWave\s*\{[^}]*opacity\s*:\s*1/s);
+  assert.match(styles, /\.fervidumWave\.is-rendered\s*\{[^}]*opacity\s*:\s*1/s);
   assert.doesNotMatch(styles, /\.fervidumWave\s*\{[^}]*transition\s*:/s);
 });
 

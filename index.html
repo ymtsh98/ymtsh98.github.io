@@ -9,20 +9,15 @@
   <link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css?v=20261111-sabotage-9">
   <link rel="stylesheet" href="css/stroke1.css?v=20260803-effect-transition-4">
-  <link rel="stylesheet" href="css/fervidum.css?v=20260803-effect-transition-1">
+  <link rel="stylesheet" href="css/fervidum.css?v=20261113-webm-6">
   <link rel="stylesheet" href="css/pui.css?v=20261026-1">
-  <script>
-    if (window.location.protocol === "file:") {
-    document.write('<script src="js/fervidum-local-texture.js"><' + '/script>');
-    }
-  </script>
   <script src="js/grid.js" defer></script>
   <script src="js/hand-drawn-frames.js?v=20260803-ballpoint-frames-4" defer></script>
-  <script src="js/gallery-layout.js?v=20260720-gallery-balance-1" defer></script>
+  <script src="js/gallery-layout.js?v=20261113-video-1" defer></script>
   <script src="js/tools-menu.js?v=20260803-tools-menu-1" defer></script>
   <script src="js/box-connections.js?v=20260803-shared-connections-8" defer></script>
   <script src="js/stroke1.js?v=20261025-background-preload-1" defer></script>
-  <script src="js/fervidum.js?v=20261111-background-1" defer></script>
+  <script src="js/fervidum.js?v=20261113-webm-6" defer></script>
   <script src="js/pui.js?v=20261111-3" defer></script>
   <script src="images/2026/sabotage-first-frame.js?v=20261111-1" defer></script>
   <script src="js/sabotage.js?v=20261111-touch-3" defer></script>
@@ -69,9 +64,12 @@
         <p class="photoNote">Stroke 1</p>
       </article>
       <article class="tile fervidumTile">
-        <img class="image fervidum"
-             src="images/2026/fervidum.png"
-             alt="fervidum">
+        <div class="fervidumMedia">
+          <video class="image fervidum"
+                 src="images/2026/fervidum.webm"
+                 width="1350" height="2400"
+                 preload="metadata" muted playsinline role="img" aria-label="fervidum"></video>
+        </div>
         <p class="photoNote">Caelum ex umeris gigantum vidi fervidum</p>
       </article>
     </main>

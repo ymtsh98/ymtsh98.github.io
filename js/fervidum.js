@@ -631,18 +631,19 @@ const resizeWaveLayer = (layer) => {
   layer.width = width;
   layer.pixelScale = canvasWidth / width;
 
-  if (layer.renderer) {
-    layer.renderer.gl.viewport(0, 0, canvasWidth, canvasHeight);
-
-    if (resized) {
-      uploadWaveTexture(layer);
-    }
-  }
+  layer.renderer?.gl.viewport(0, 0, canvasWidth, canvasHeight);
 };
 
 const resizeWaveLayers = () => {
   waveResizeFrame = undefined;
-  waveLayers.forEach(resizeWaveLayer);
+  const now = performance.now();
+  const warpActive = document.body.classList.contains("fervidumWarpActive");
+  waveLayers.forEach((layer) => {
+    resizeWaveLayer(layer);
+    if (layer.isVideo || warpActive) {
+      renderWaveLayer(layer, now, warpActive);
+    }
+  });
 };
 
 const scheduleWaveResize = () => {
@@ -651,7 +652,7 @@ const scheduleWaveResize = () => {
   }
 };
 
-const renderWaveLayer = (layer, now) => {
+const renderWaveLayer = (layer, now, distort = true) => {
   if (!layer.available || layer.canvas.width === 0 || layer.canvas.height === 0) {
     return;
   }
@@ -670,6 +671,7 @@ const renderWaveLayer = (layer, now) => {
 
   if (gl.isContextLost()) {
     layer.available = false;
+    layer.canvas.classList.remove("is-rendered");
     return;
   }
 
@@ -678,6 +680,14 @@ const renderWaveLayer = (layer, now) => {
   gl.enableVertexAttribArray(positionLocation);
   gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
   gl.activeTexture(gl.TEXTURE0);
+
+  const { image } = layer;
+  if (layer.isVideo && image.readyState >= 2 && !image.seeking && image.currentTime !== layer.videoTextureTime) {
+    if (uploadWaveTexture(layer)) {
+      layer.videoTextureTime = image.currentTime;
+    }
+  }
+
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.uniform1i(imageLocation, 0);
   gl.uniform2f(resolutionLocation, layer.canvas.width, layer.canvas.height);
@@ -687,7 +697,7 @@ const renderWaveLayer = (layer, now) => {
     ? 1
     : 1 - easeInOut(clamp((now - waveFadeStart) / waveFadeDuration, 0, 1));
 
-  gl.uniform1f(strengthLocation, 3.4 * layer.pixelScale * ramp * fade);
+  gl.uniform1f(strengthLocation, distort ? 3.4 * layer.pixelScale * ramp * fade : 0);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 };
 
@@ -695,28 +705,32 @@ const finishWaveFade = () => {
   waveFrame = undefined;
   waveFadeStart = undefined;
   document.body.classList.remove("fervidumWarpActive");
-  clearWaveCanvases();
 };
 
-const renderWaves = (now) => {
-  if (!document.body.classList.contains("fervidumWarpActive")) {
-    waveFrame = undefined;
-    return;
-  }
+const hasPlayingWaveVideo = () => waveLayers.some(({ available, isVideo, image }) => (
+  available && isVideo && !image.paused && !image.ended
+));
 
-  const fadeComplete = waveFadeStart !== undefined && now - waveFadeStart >= waveFadeDuration;
+const renderWaves = (now) => {
+  const warpActive = document.body.classList.contains("fervidumWarpActive");
+  const fadeComplete = warpActive && waveFadeStart !== undefined && now - waveFadeStart >= waveFadeDuration;
 
   if (now - waveLastRender >= waveFrameInterval || fadeComplete) {
-    waveLayers.forEach((layer) => renderWaveLayer(layer, now));
+    waveLayers.forEach((layer) => {
+      if (warpActive || layer.isVideo) {
+        renderWaveLayer(layer, now, warpActive && !fadeComplete);
+      }
+    });
     waveLastRender = now;
   }
 
   if (fadeComplete) {
     finishWaveFade();
-    return;
   }
 
-  waveFrame = requestAnimationFrame(renderWaves);
+  waveFrame = (warpActive && !fadeComplete) || hasPlayingWaveVideo()
+    ? requestAnimationFrame(renderWaves)
+    : undefined;
 };
 
 const startWave = (animate = true) => {
@@ -729,6 +743,7 @@ const startWave = (animate = true) => {
   }
 
   cancelAnimationFrame(waveFrame);
+  waveFrame = undefined;
   clearTimeout(waveClearTimer);
   waveFadeStart = undefined;
   waveStartTime = performance.now();
@@ -751,20 +766,20 @@ const startWave = (animate = true) => {
   return true;
 };
 
-const clearWaveCanvases = () => {
-  waveLayers.forEach(({ canvas, renderer }) => {
-    renderer.gl.clearColor(0, 0, 0, 0);
-    renderer.gl.clear(renderer.gl.COLOR_BUFFER_BIT);
-    renderer.gl.viewport(0, 0, canvas.width, canvas.height);
-  });
-};
-
 const stopWave = () => {
   cancelAnimationFrame(waveFrame);
   waveFrame = undefined;
   clearTimeout(waveClearTimer);
   waveFadeStart = undefined;
-  clearWaveCanvases();
+  const now = performance.now();
+  waveLayers.forEach((layer) => {
+    if (layer.isVideo) {
+      renderWaveLayer(layer, now, false);
+    }
+  });
+  if (hasPlayingWaveVideo()) {
+    waveFrame = requestAnimationFrame(renderWaves);
+  }
 };
 
 const fadeOutWave = () => {
@@ -786,10 +801,11 @@ const createWaveLayers = () => {
   const images = document.querySelectorAll(".fervidumTile .fervidum");
 
   const createWaveLayer = (image, imageIndex) => {
-    const textureImage = window.fervidumLocalTexture || image;
+    const isVideo = image.tagName === "VIDEO";
+    const hasFrame = isVideo ? image.readyState >= 2 : image.complete && image.naturalWidth > 0;
 
-    if (!textureImage.complete || textureImage.naturalWidth === 0) {
-      textureImage.addEventListener("load", () => {
+    if (!hasFrame) {
+      image.addEventListener(isVideo ? "loadeddata" : "load", () => {
         createWaveLayer(image, imageIndex);
       }, { once: true });
 
@@ -801,14 +817,17 @@ const createWaveLayers = () => {
     }
 
     const canvas = document.createElement("canvas");
+    const media = image.parentElement;
     const layer = {
       available: true,
       canvas,
       image,
       imageIndex,
+      isVideo,
       pixelScale: 1,
       renderer: undefined,
-      textureImage,
+      textureImage: image,
+      videoTextureTime: isVideo ? image.currentTime : undefined,
       width: 0
     };
 
@@ -823,21 +842,36 @@ const createWaveLayers = () => {
       return;
     }
 
-    const tile = image.parentElement;
     const host = document.createElement("div");
 
     host.className = "fervidumWarpHost";
-    tile.insertBefore(host, image);
+    media.insertBefore(host, image);
     host.appendChild(image);
     image.classList.add("fervidumSource");
 
     canvas.className = "fervidumWave";
     canvas.setAttribute("aria-hidden", "true");
+    if (isVideo) {
+      renderWaveLayer(layer, performance.now(), false);
+      if (layer.available) {
+        canvas.classList.add("is-rendered");
+      }
+      image.addEventListener("playing", () => {
+        if (!waveFrame && layer.available) {
+          waveFrame = requestAnimationFrame(renderWaves);
+        }
+      });
+      image.addEventListener("seeked", () => {
+        layer.videoTextureTime = undefined;
+        renderWaveLayer(layer, performance.now(), document.body.classList.contains("fervidumWarpActive"));
+      });
+    }
     host.appendChild(canvas);
 
     canvas.addEventListener("webglcontextlost", (event) => {
       event.preventDefault();
       layer.available = false;
+      canvas.classList.remove("is-rendered");
       document.body.classList.remove("fervidumWarpActive");
       stopWave();
     });
@@ -846,6 +880,8 @@ const createWaveLayers = () => {
 
     if (document.body.classList.contains("fervidumWarpActive")) {
       startWave();
+    } else if (hasPlayingWaveVideo() && !waveFrame) {
+      waveFrame = requestAnimationFrame(renderWaves);
     }
   };
 
@@ -894,6 +930,76 @@ const resetFervidum = () => {
   );
   document.body.classList.add("fervidumExit");
   startGridRestore();
+};
+
+const initializeFervidumVideo = (tile) => {
+  const video = tile.querySelector("video.fervidum");
+  if (!video) {
+    return;
+  }
+
+  let playbackStarted = false;
+
+  const preloadVideo = () => {
+    video.preload = "auto";
+  };
+
+  const scheduleVideoPreload = () => {
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(preloadVideo);
+    } else {
+      window.setTimeout(preloadVideo, 0);
+    }
+  };
+
+  if (document.readyState === "complete") {
+    scheduleVideoPreload();
+  } else {
+    window.addEventListener("load", scheduleVideoPreload, { once: true });
+  }
+
+  if (!canUseHoverEffects) {
+    return;
+  }
+
+  const resetVideo = () => {
+    playbackStarted = false;
+    if (video.readyState >= 1) {
+      video.currentTime = 0;
+    }
+  };
+
+  video.addEventListener("playing", () => {
+    playbackStarted = !video.paused;
+  });
+  video.addEventListener("error", () => {
+    playbackStarted = false;
+  });
+  video.addEventListener("ended", () => {
+    if (video.ended) {
+      resetVideo();
+    }
+  });
+
+  tile.addEventListener("mouseenter", () => {
+    preloadVideo();
+    if (video.error) {
+      video.load();
+    }
+    if (video.ended) {
+      video.currentTime = 0;
+    }
+    video.loop = true;
+    video.play().catch(() => {});
+  });
+
+  tile.addEventListener("mouseleave", () => {
+    video.loop = false;
+    if (!playbackStarted) {
+      video.pause();
+      resetVideo();
+    }
+  });
 };
 
 const initializeHoverEffects = () => {
@@ -1019,6 +1125,8 @@ const initializeTouchEffects = () => {
     effectActive = false;
   });
 };
+
+fervidumTiles.forEach(initializeFervidumVideo);
 
 if (canUseHoverEffects) {
   initializeHoverEffects();

@@ -6,6 +6,12 @@ const getHorizontalPadding = (element) => {
   return (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
 };
 
+const getMediaAspectRatio = (media) => {
+  const width = media?.naturalWidth || media?.videoWidth;
+  const height = media?.naturalHeight || media?.videoHeight;
+  return width && height ? width / height : 0;
+};
+
 const balanceImageGallery = (gallery) => {
   const tiles = Array.from(gallery.querySelectorAll(":scope > .tile"));
 
@@ -14,13 +20,11 @@ const balanceImageGallery = (gallery) => {
     return;
   }
 
-  const images = tiles.map((tile) => tile.querySelector(".image"));
-  if (images.some((image) => !image || !image.naturalWidth || !image.naturalHeight)) {
+  const [firstAspectRatio, secondAspectRatio] = tiles.map((tile) => getMediaAspectRatio(tile.querySelector(".image")));
+  if (!firstAspectRatio || !secondAspectRatio) {
     return;
   }
 
-  const firstAspectRatio = images[0].naturalWidth / images[0].naturalHeight;
-  const secondAspectRatio = images[1].naturalWidth / images[1].naturalHeight;
   const imageWidthRatio = Math.sqrt(firstAspectRatio / secondAspectRatio);
   const gap = parseFloat(getComputedStyle(gallery).columnGap) || 0;
   const firstPadding = getHorizontalPadding(tiles[0]);
@@ -55,7 +59,7 @@ imageGalleries.forEach((gallery) => {
   const images = gallery.querySelectorAll(".image");
 
   images.forEach((image) => {
-    image.addEventListener("load", scheduleImageGalleryBalance, { once: true });
+    image.addEventListener(image.tagName === "VIDEO" ? "loadedmetadata" : "load", scheduleImageGalleryBalance, { once: true });
   });
 });
 
