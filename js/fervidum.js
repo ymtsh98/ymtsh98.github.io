@@ -1096,6 +1096,15 @@ const initializeTouchEffects = () => {
     effectsReady = true;
   };
 
+  const stopTouchVideoLoop = () => {
+    fervidumTiles.forEach((tile) => {
+      const video = tile.querySelector("video.fervidum");
+      if (video) {
+        video.loop = false;
+      }
+    });
+  };
+
   const activateTouchEffect = () => {
     prepareEffects();
     // A tap keeps the one-shot background-color transition as well as the image-local haze.
@@ -1113,6 +1122,7 @@ const initializeTouchEffects = () => {
   document.addEventListener("gallery:effectactivate", (event) => {
     if (event.detail?.effect !== "fervidum") {
       fadeOutEffect();
+      stopTouchVideoLoop();
       effectActive = false;
     }
   });
@@ -1124,8 +1134,9 @@ const initializeTouchEffects = () => {
     const activateTouch = () => {
       if (video) {
         if (!video.hasAttribute("src") || video.error) {
-          video.src = video.dataset.fervidumTouchSrc;
+          video.src = video.dataset.fervidumSrc;
         }
+        video.loop = true;
         video.play().catch(() => {});
       }
       activateTouchEffect();
@@ -1173,6 +1184,7 @@ const initializeTouchEffects = () => {
     }
 
     resetFervidum();
+    stopTouchVideoLoop();
     effectActive = false;
   });
 };
