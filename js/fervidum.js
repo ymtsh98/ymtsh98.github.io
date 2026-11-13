@@ -685,14 +685,20 @@ const renderWaveLayer = (layer, now, distort = true) => {
 
   const { video } = layer;
   if (video && video.readyState >= 2 && !video.seeking && !video.error && video.currentTime !== layer.videoTextureTime) {
-    layer.textureImage = video;
+    if (canUseTouchEffects) {
+      const frame = layer.videoCanvas || document.createElement("canvas");
+      layer.videoCanvas = frame;
+      if (frame.width !== layer.canvas.width || frame.height !== layer.canvas.height) {
+        frame.width = layer.canvas.width;
+        frame.height = layer.canvas.height;
+      }
+      frame.getContext("2d").drawImage(video, 0, 0, frame.width, frame.height);
+      layer.textureImage = frame;
+    } else {
+      layer.textureImage = video;
+    }
     if (uploadWaveTexture(layer)) {
       layer.videoTextureTime = video.currentTime;
-    } else {
-      layer.canvas.hidden = !video.paused || video.classList.contains("is-visible");
-      if (layer.canvas.hidden) {
-        return;
-      }
     }
   }
 
