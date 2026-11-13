@@ -699,6 +699,9 @@ const renderWaveLayer = (layer, now, distort = true) => {
 
   gl.uniform1f(strengthLocation, distort ? 3.4 * layer.pixelScale * ramp * fade : 0);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
+  if (layer.isVideo) {
+    layer.canvas.hidden = gl.getError() !== gl.NO_ERROR;
+  }
 };
 
 const finishWaveFade = () => {
@@ -798,7 +801,9 @@ const fadeOutWave = () => {
 };
 
 const createWaveLayers = () => {
-  const images = document.querySelectorAll(".fervidumTile .fervidum");
+  const images = document.querySelectorAll(canUseHoverEffects
+    ? ".fervidumTile .fervidum"
+    : ".fervidumTile .fervidumPoster");
 
   const createWaveLayer = (image, imageIndex) => {
     const isVideo = image.tagName === "VIDEO";
@@ -812,12 +817,12 @@ const createWaveLayers = () => {
       return;
     }
 
-    if (image.closest(".fervidumWarpHost")) {
+    const media = image.parentElement;
+    if (media.classList.contains("fervidumWarpHost")) {
       return;
     }
 
     const canvas = document.createElement("canvas");
-    const media = image.parentElement;
     const layer = {
       available: true,
       canvas,
@@ -842,11 +847,7 @@ const createWaveLayers = () => {
       return;
     }
 
-    const host = document.createElement("div");
-
-    host.className = "fervidumWarpHost";
-    media.insertBefore(host, image);
-    host.appendChild(image);
+    media.classList.add("fervidumWarpHost");
     image.classList.add("fervidumSource");
 
     canvas.className = "fervidumWave";
@@ -865,8 +866,19 @@ const createWaveLayers = () => {
         layer.videoTextureTime = undefined;
         renderWaveLayer(layer, performance.now(), document.body.classList.contains("fervidumWarpActive"));
       });
+      image.addEventListener("error", () => {
+        layer.available = false;
+        canvas.hidden = true;
+      });
+      image.addEventListener("loadeddata", () => {
+        if (!layer.available && !layer.renderer.gl.isContextLost() && uploadWaveTexture(layer)) {
+          layer.available = true;
+          layer.videoTextureTime = image.currentTime;
+          renderWaveLayer(layer, performance.now(), document.body.classList.contains("fervidumWarpActive"));
+        }
+      });
     }
-    host.appendChild(canvas);
+    media.appendChild(canvas);
 
     canvas.addEventListener("webglcontextlost", (event) => {
       event.preventDefault();
@@ -938,6 +950,8 @@ const initializeFervidumVideo = (tile) => {
     return;
   }
 
+  video.src = video.dataset.fervidumSrc;
+
   let playbackStarted = false;
 
   const preloadVideo = () => {
@@ -958,10 +972,6 @@ const initializeFervidumVideo = (tile) => {
     window.addEventListener("load", scheduleVideoPreload, { once: true });
   }
 
-  if (!canUseHoverEffects) {
-    return;
-  }
-
   const resetVideo = () => {
     playbackStarted = false;
     if (video.readyState >= 1) {
@@ -972,8 +982,10 @@ const initializeFervidumVideo = (tile) => {
   video.addEventListener("playing", () => {
     playbackStarted = !video.paused;
   });
+  video.addEventListener("playing", () => revealFervidumVideo(video));
   video.addEventListener("error", () => {
     playbackStarted = false;
+    video.classList.remove("is-visible");
   });
   video.addEventListener("ended", () => {
     if (video.ended) {
@@ -1050,6 +1062,20 @@ const initializeHoverEffects = () => {
   });
 };
 
+const revealFervidumVideo = (video) => {
+  const reveal = () => {
+    if (!video.paused && !video.error) {
+      video.classList.add("is-visible");
+    }
+  };
+
+  if (video.requestVideoFrameCallback) {
+    video.requestVideoFrameCallback(reveal);
+  } else {
+    reveal();
+  }
+};
+
 const initializeTouchEffects = () => {
   let effectsReady = false;
   let effectActive = false;
@@ -1089,6 +1115,23 @@ const initializeTouchEffects = () => {
 
   fervidumTiles.forEach((tile) => {
     const image = tile.querySelector(".image");
+    const video = tile.querySelector("video.fervidum");
+
+    const activateTouch = () => {
+      if (video) {
+        if (!video.hasAttribute("src") || video.error) {
+          video.src = video.dataset.fervidumTouchSrc;
+        }
+        video.play().catch(() => {});
+      }
+      activateTouchEffect();
+    };
+
+    if (video) {
+      video.addEventListener("playing", () => revealFervidumVideo(video));
+      video.addEventListener("ended", () => video.classList.remove("is-visible"));
+      video.addEventListener("error", () => video.classList.remove("is-visible"));
+    }
 
     image?.addEventListener("pointerup", (event) => {
       if (event.pointerType !== "touch") {
@@ -1096,7 +1139,7 @@ const initializeTouchEffects = () => {
       }
 
       lastTouchActivation = performance.now();
-      activateTouchEffect();
+      activateTouch();
     });
 
     image?.addEventListener("click", () => {
@@ -1105,7 +1148,7 @@ const initializeTouchEffects = () => {
         return;
       }
 
-      activateTouchEffect();
+      activateTouch();
     });
   });
 
@@ -1126,9 +1169,8 @@ const initializeTouchEffects = () => {
   });
 };
 
-fervidumTiles.forEach(initializeFervidumVideo);
-
 if (canUseHoverEffects) {
+  fervidumTiles.forEach(initializeFervidumVideo);
   initializeHoverEffects();
 } else if (canUseTouchEffects) {
   initializeTouchEffects();

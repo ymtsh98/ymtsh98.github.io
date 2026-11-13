@@ -67,9 +67,34 @@ canvas {
   position: relative;
 }
 
-.fervidum {
+.fervidumMedia {
+  isolation: isolate;
+}
+
+.fervidumPoster {
   aspect-ratio: 9 / 16;
+  touch-action: manipulation;
+}
+
+.fervidumMedia > .fervidum {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
   object-fit: fill;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fervidumMedia > .fervidum.is-visible {
+  opacity: 1;
+}
+
+@media not all and (hover: hover) and (pointer: fine) {
+  .fervidumMedia > .fervidum {
+    z-index: 3;
+  }
 }
 
 .fervidumSource {
@@ -95,6 +120,10 @@ canvas {
 
 body.fervidumWarpActive .fervidumWave {
   opacity: 1;
+}
+
+.fervidumWave[hidden] {
+  display: none;
 }
 
 .fervidumWave.is-rendered {

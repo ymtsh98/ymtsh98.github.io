@@ -20,7 +20,9 @@ const balanceImageGallery = (gallery) => {
     return;
   }
 
-  const [firstAspectRatio, secondAspectRatio] = tiles.map((tile) => getMediaAspectRatio(tile.querySelector(".image")));
+  const [firstAspectRatio, secondAspectRatio] = tiles.map((tile) => (
+    Array.from(tile.querySelectorAll(".image"), getMediaAspectRatio).find(Boolean)
+  ));
   if (!firstAspectRatio || !secondAspectRatio) {
     return;
   }
