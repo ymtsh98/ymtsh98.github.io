@@ -471,7 +471,11 @@ const waveVertexShader = `
 `;
 
 const waveFragmentShader = `
+  #ifdef GL_FRAGMENT_PRECISION_HIGH
+  precision highp float;
+  #else
   precision mediump float;
+  #endif
 
   varying vec2 v_uv;
   uniform sampler2D u_image;
@@ -608,9 +612,7 @@ const uploadWaveTexture = (layer) => {
 };
 
 const resizeWaveLayer = (layer) => {
-  const rect = layer.image.getBoundingClientRect();
-  const width = Math.round(rect.width);
-  const height = Math.round(rect.height);
+  const { width, height } = layer.image.getBoundingClientRect();
 
   if (width < 1 || height < 1) {
     return;
@@ -640,7 +642,7 @@ const resizeWaveLayers = () => {
   const warpActive = document.body.classList.contains("fervidumWarpActive");
   waveLayers.forEach((layer) => {
     resizeWaveLayer(layer);
-    if (layer.isVideo || warpActive) {
+    if (layer.video || warpActive) {
       renderWaveLayer(layer, now, warpActive);
     }
   });
@@ -681,10 +683,16 @@ const renderWaveLayer = (layer, now, distort = true) => {
   gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
   gl.activeTexture(gl.TEXTURE0);
 
-  const { image } = layer;
-  if (layer.isVideo && image.readyState >= 2 && !image.seeking && image.currentTime !== layer.videoTextureTime) {
+  const { video } = layer;
+  if (video && video.readyState >= 2 && !video.seeking && !video.error && video.currentTime !== layer.videoTextureTime) {
+    layer.textureImage = video;
     if (uploadWaveTexture(layer)) {
-      layer.videoTextureTime = image.currentTime;
+      layer.videoTextureTime = video.currentTime;
+    } else {
+      layer.canvas.hidden = !video.paused || video.classList.contains("is-visible");
+      if (layer.canvas.hidden) {
+        return;
+      }
     }
   }
 
@@ -699,7 +707,7 @@ const renderWaveLayer = (layer, now, distort = true) => {
 
   gl.uniform1f(strengthLocation, distort ? 3.4 * layer.pixelScale * ramp * fade : 0);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
-  if (layer.isVideo) {
+  if (video) {
     layer.canvas.hidden = gl.getError() !== gl.NO_ERROR;
   }
 };
@@ -710,8 +718,8 @@ const finishWaveFade = () => {
   document.body.classList.remove("fervidumWarpActive");
 };
 
-const hasPlayingWaveVideo = () => waveLayers.some(({ available, isVideo, image }) => (
-  available && isVideo && !image.paused && !image.ended
+const hasPlayingWaveVideo = () => waveLayers.some(({ available, video }) => (
+  available && video && !video.paused && !video.ended
 ));
 
 const renderWaves = (now) => {
@@ -720,7 +728,7 @@ const renderWaves = (now) => {
 
   if (now - waveLastRender >= waveFrameInterval || fadeComplete) {
     waveLayers.forEach((layer) => {
-      if (warpActive || layer.isVideo) {
+      if (warpActive || layer.video) {
         renderWaveLayer(layer, now, warpActive && !fadeComplete);
       }
     });
@@ -776,7 +784,7 @@ const stopWave = () => {
   waveFadeStart = undefined;
   const now = performance.now();
   waveLayers.forEach((layer) => {
-    if (layer.isVideo) {
+    if (layer.video) {
       renderWaveLayer(layer, now, false);
     }
   });
@@ -801,19 +809,11 @@ const fadeOutWave = () => {
 };
 
 const createWaveLayers = () => {
-  const images = document.querySelectorAll(canUseHoverEffects
-    ? ".fervidumTile .fervidum"
-    : ".fervidumTile .fervidumPoster");
+  const images = document.querySelectorAll(".fervidumTile .fervidumPoster");
 
-  const createWaveLayer = (image, imageIndex) => {
-    const isVideo = image.tagName === "VIDEO";
-    const hasFrame = isVideo ? image.readyState >= 2 : image.complete && image.naturalWidth > 0;
-
-    if (!hasFrame) {
-      image.addEventListener(isVideo ? "loadeddata" : "load", () => {
-        createWaveLayer(image, imageIndex);
-      }, { once: true });
-
+  const createWaveLayer = (image) => {
+    if (!image.complete || image.naturalWidth === 0) {
+      image.addEventListener("load", () => createWaveLayer(image), { once: true });
       return;
     }
 
@@ -823,16 +823,16 @@ const createWaveLayers = () => {
     }
 
     const canvas = document.createElement("canvas");
+    const video = media.querySelector("video.fervidum");
     const layer = {
       available: true,
       canvas,
       image,
-      imageIndex,
-      isVideo,
       pixelScale: 1,
       renderer: undefined,
       textureImage: image,
-      videoTextureTime: isVideo ? image.currentTime : undefined,
+      video,
+      videoTextureTime: undefined,
       width: 0
     };
 
@@ -852,28 +852,32 @@ const createWaveLayers = () => {
 
     canvas.className = "fervidumWave";
     canvas.setAttribute("aria-hidden", "true");
-    if (isVideo) {
-      renderWaveLayer(layer, performance.now(), false);
+    if (video) {
+      const updateVideoFrame = () => {
+        layer.videoTextureTime = undefined;
+        renderWaveLayer(layer, performance.now(), document.body.classList.contains("fervidumWarpActive"));
+      };
+
+      updateVideoFrame();
       if (layer.available) {
         canvas.classList.add("is-rendered");
       }
-      image.addEventListener("playing", () => {
+      video.addEventListener("playing", () => {
         if (!waveFrame && layer.available) {
           waveFrame = requestAnimationFrame(renderWaves);
         }
       });
-      image.addEventListener("seeked", () => {
+      video.addEventListener("seeked", updateVideoFrame);
+      video.addEventListener("loadeddata", () => {
+        updateVideoFrame();
+        if (canUseHoverEffects && video.paused && !video.seeking && !video.error) {
+          video.classList.add("is-visible");
+        }
+      });
+      video.addEventListener("error", () => {
+        layer.textureImage = image;
         layer.videoTextureTime = undefined;
-        renderWaveLayer(layer, performance.now(), document.body.classList.contains("fervidumWarpActive"));
-      });
-      image.addEventListener("error", () => {
-        layer.available = false;
-        canvas.hidden = true;
-      });
-      image.addEventListener("loadeddata", () => {
-        if (!layer.available && !layer.renderer.gl.isContextLost() && uploadWaveTexture(layer)) {
-          layer.available = true;
-          layer.videoTextureTime = image.currentTime;
+        if (layer.available && uploadWaveTexture(layer)) {
           renderWaveLayer(layer, performance.now(), document.body.classList.contains("fervidumWarpActive"));
         }
       });
@@ -1129,7 +1133,11 @@ const initializeTouchEffects = () => {
 
     if (video) {
       video.addEventListener("playing", () => revealFervidumVideo(video));
-      video.addEventListener("ended", () => video.classList.remove("is-visible"));
+      video.addEventListener("ended", () => {
+        if (video.ended) {
+          video.currentTime = 0;
+        }
+      });
       video.addEventListener("error", () => video.classList.remove("is-visible"));
     }
 

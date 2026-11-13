@@ -190,7 +190,7 @@ const createHarness = ({ webgl }) => {
   const tile = new FakeElement("article");
   tile.classList.add("tile", "fervidumTile");
   const image = new FakeElement("img");
-  image.classList.add("image", "fervidum");
+  image.classList.add("image", "fervidumPoster");
   image.complete = true;
   image.naturalWidth = 675;
   image.getBoundingClientRect = () => ({
@@ -214,7 +214,7 @@ const createHarness = ({ webgl }) => {
       scrollHeight: 1200
     },
     querySelectorAll(selector) {
-      if (selector === ".fervidumTile" || selector === ".fervidumTile .fervidum") {
+      if (selector === ".fervidumTile" || selector === ".fervidumTile .fervidumPoster") {
         return [selector === ".fervidumTile" ? tile : image];
       }
 
@@ -414,7 +414,7 @@ test("the haze canvas stays visible when it renders the video", () => {
 test("the heat haze only wraps fervidum images", () => {
   assert.match(
     script,
-    /document\.querySelectorAll\("\.fervidumTile \.fervidum"\)/
+    /document\.querySelectorAll\("\.fervidumTile \.fervidumPoster"\)/
   );
   assert.doesNotMatch(script, /document\.querySelectorAll\("\.gallery img"\)/);
 });

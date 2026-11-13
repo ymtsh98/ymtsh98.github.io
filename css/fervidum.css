@@ -91,12 +91,6 @@ canvas {
   opacity: 1;
 }
 
-@media not all and (hover: hover) and (pointer: fine) {
-  .fervidumMedia > .fervidum {
-    z-index: 3;
-  }
-}
-
 .fervidumSource {
   touch-action: manipulation;
 }
