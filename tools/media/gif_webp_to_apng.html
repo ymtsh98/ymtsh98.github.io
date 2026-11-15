@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../../css/style.css?v=20260803-ballpoint-frames-3">
+  <link rel="stylesheet" href="../../css/style.css?v=20261115-apng-option-stack">
   <script src="../../js/box-connections.js?v=20260803-shared-connections-8" defer></script>
   <script src="../../js/hand-drawn-frames.js?v=20260803-ballpoint-frames-4" defer></script>
 </head>
@@ -16,15 +16,33 @@
   <canvas class="handDrawnFrames" aria-hidden="true"></canvas>
   <div class="page toolPage">
     <main class="toolContent contentFrame">
-      <h1>GIF/WebP to APNG</h1>
-      <p class="note">Offline<br>No Additional Quality Loss</p>
-
+      <h1>GIF/WebP to APNG (offline)</h1>
+      <br />
       <div class="controls">
         <label id="dropZone" class="dropZone disabled" for="fileInput">
-          <input id="fileInput" type="file" accept="image/gif,image/webp,.gif,.webp" disabled>
-          <span class="dropTitle">Drop GIF or WebP here</span>
+          <input id="fileInput" type="file" accept="image/gif,image/webp,image/png,image/apng,.gif,.webp,.png,.apng" disabled>
+          <span class="dropTitle">Drop a GIF, WebP, APNG, or PNG here</span>
           <span class="dropHint">or click to choose a file</span>
         </label>
+        <div class="encodingOptions">
+          <div>
+            <div><label for="colorLimit">Maximum Colors:</label> <span id="colorLimitHint">Fewer colors -&gt; smaller file & lower quality</span></div>
+            <select id="colorLimit" aria-describedby="colorLimitHint" disabled>
+              <option value="0">Original colors</option>
+              <option value="256">256</option>
+              <option value="128">128</option>
+              <option value="64">64</option>
+              <option value="32">32</option>
+              <option value="16">16</option>
+              <option value="8">8</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+          <div>
+            <div><label for="tolerance">Frame Diff Tolerance:</label> <span id="toleranceHint">Higher value -&gt; smaller file & lower quality</span></div>
+            <input id="tolerance" type="number" min="0" max="255" step="1" value="0" aria-describedby="toleranceHint" disabled>
+          </div>
+        </div>
         <button id="convertButton" type="button" disabled>Convert to APNG</button>
         <progress id="progress" max="100" value="0"></progress>
       </div>
@@ -49,6 +67,36 @@
     const signature = new Uint8Array([
       137, 80, 78, 71, 13, 10, 26, 10
     ]);
+    const colorBinCount = 1 + 17 * 32 ** 3;
+    const filterCosts = Uint8Array.from({ length: 256 }, (_, value) => Math.min(value, 256 - value));
+    const decodedFrameCacheBytes = 64 * 1024 * 1024;
+    let kernelsPromise;
+
+    async function loadKernels(url) {
+      try {
+        const response = await fetch(url);
+
+        if (!response.ok) {
+          return null;
+        }
+
+        const { instance } = await WebAssembly.instantiate(await response.arrayBuffer());
+        return instance.exports;
+      } catch {
+        return null;
+      }
+    }
+
+    function getKernelBuffer(kernels, size) {
+      const offset = kernels.__heap_base.value;
+      const required = offset + size - kernels.memory.buffer.byteLength;
+
+      if (required > 0) {
+        kernels.memory.grow(Math.ceil(required / 65536));
+      }
+
+      return offset;
+    }
 
     function getUint24(view, offset) {
       return view.getUint8(offset)
@@ -91,6 +139,46 @@
       }
 
       return { loop, frames };
+    }
+
+    function getPngInfo(buffer) {
+      const bytes = new Uint8Array(buffer);
+
+      if (!signature.every((value, index) => bytes[index] === value)) {
+        throw new Error("Invalid PNG file");
+      }
+
+      const view = new DataView(buffer);
+      const delays = [];
+      let frameCount = 0;
+      let loop = 0;
+      let hasPoster = false;
+
+      for (let offset = signature.length; offset + 12 <= bytes.length;) {
+        const length = view.getUint32(offset);
+        const name = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+        const start = offset + 8;
+        const next = start + length + 4;
+
+        if (next > bytes.length) {
+          throw new Error("Incomplete PNG file");
+        }
+
+        if (name === "acTL" && length === 8) {
+          frameCount = view.getUint32(start);
+          loop = view.getUint32(start + 4);
+        } else if (name === "fcTL" && length === 26) {
+          delays.push([view.getUint16(start + 20), view.getUint16(start + 22)]);
+        } else if (name === "IDAT" && frameCount && delays.length === 0) {
+          hasPoster = true;
+        } else if (name === "IEND") {
+          break;
+        }
+
+        offset = next;
+      }
+
+      return { loop, frameCount, delays, hasPoster };
     }
 
     function skipGifBlocks(data, offset) {
@@ -290,14 +378,14 @@
       return chunk;
     }
 
-    function makeHeader(width, height) {
+    function makeHeader(width, height, bitDepth, colorType) {
       const data = new Uint8Array(13);
       const view = new DataView(data.buffer);
 
       view.setUint32(0, width);
       view.setUint32(4, height);
-      data[8] = 8;
-      data[9] = 6;
+      data[8] = bitDepth;
+      data[9] = colorType;
 
       return makeChunk("IHDR", data);
     }
@@ -349,38 +437,42 @@
     function makeFrame(sequence, rect, delay, blend) {
       const data = new Uint8Array(26);
       const view = new DataView(data.buffer);
-      const fraction = getDelay(delay);
 
       view.setUint32(0, sequence);
       view.setUint32(4, rect.width);
       view.setUint32(8, rect.height);
       view.setUint32(12, rect.x);
       view.setUint32(16, rect.y);
-      view.setUint16(20, fraction[0]);
-      view.setUint16(22, fraction[1]);
+      view.setUint16(20, delay[0]);
+      view.setUint16(22, delay[1]);
       data[24] = 0;
       data[25] = blend;
 
       return makeChunk("fcTL", data);
     }
 
-    function getDifferenceRect(previous, current, width, height) {
+    function getDifferenceRect(previous, current, width, height, tolerance) {
+      const previousWords = new Uint32Array(previous.buffer, previous.byteOffset, previous.length / 4);
+      const currentWords = new Uint32Array(current.buffer, current.byteOffset, current.length / 4);
       let left = width;
       let top = height;
       let right = -1;
       let bottom = -1;
 
       for (let y = 0; y < height; y += 1) {
-        const row = y * width * 4;
+        const row = y * width;
 
         for (let x = 0; x < width; x += 1) {
-          const offset = row + x * 4;
+          const index = row + x;
+          const offset = index * 4;
 
           if (
-            previous[offset] !== current[offset]
-            || previous[offset + 1] !== current[offset + 1]
-            || previous[offset + 2] !== current[offset + 2]
-            || previous[offset + 3] !== current[offset + 3]
+            previousWords[index] !== currentWords[index]
+            && (tolerance === 0
+              || Math.abs(previous[offset] - current[offset]) > tolerance
+              || Math.abs(previous[offset + 1] - current[offset + 1]) > tolerance
+              || Math.abs(previous[offset + 2] - current[offset + 2]) > tolerance
+              || Math.abs(previous[offset + 3] - current[offset + 3]) > tolerance)
           ) {
             left = Math.min(left, x);
             top = Math.min(top, y);
@@ -400,6 +492,344 @@
         width: right - left + 1,
         height: bottom - top + 1
       };
+    }
+
+    function getColor(pixels, offset) {
+      return (pixels[offset] | pixels[offset + 1] << 8
+        | pixels[offset + 2] << 16 | pixels[offset + 3] << 24) >>> 0;
+    }
+
+    function getColorBin(color) {
+      const alpha = color >>> 24;
+
+      if (alpha === 0) {
+        return 0;
+      }
+
+      const alphaBin = alpha === 255 ? 16 : alpha >> 4;
+      return 1 + ((alphaBin << 15) | ((color >>> 3 & 31) << 10)
+        | ((color >>> 11 & 31) << 5) | (color >>> 19 & 31));
+    }
+
+    function addColorToBins(bins, color, count) {
+      const key = getColorBin(color);
+      const { counts, red, green, blue, alpha, keys } = bins;
+
+      if (counts[key] === 0) {
+        keys.push(key);
+      }
+
+      counts[key] += count;
+      red[key] += (color & 255) * count;
+      green[key] += (color >>> 8 & 255) * count;
+      blue[key] += (color >>> 16 & 255) * count;
+      alpha[key] += (color >>> 24) * count;
+    }
+
+    function collectColors(histogram, pixels) {
+      const words = new Uint32Array(pixels.buffer, pixels.byteOffset, pixels.length / 4);
+      let { exact, bins } = histogram;
+      let index = 0;
+
+      while (exact && index < words.length) {
+        const start = index;
+        const word = words[index];
+        index += 1;
+
+        while (index < words.length && words[index] === word) {
+          index += 1;
+        }
+
+        const color = getColor(pixels, start * 4);
+        exact.set(color, (exact.get(color) || 0) + index - start);
+
+        if (exact.size > 65536) {
+          bins = {
+            counts: new Float64Array(colorBinCount),
+            red: new Float64Array(colorBinCount),
+            green: new Float64Array(colorBinCount),
+            blue: new Float64Array(colorBinCount),
+            alpha: new Float64Array(colorBinCount),
+            keys: []
+          };
+
+          for (const [entry, count] of exact) {
+            addColorToBins(bins, entry, count);
+          }
+
+          exact = null;
+          histogram.exact = null;
+          histogram.bins = bins;
+        }
+      }
+
+      while (index < words.length) {
+        const start = index;
+        const word = words[index];
+        index += 1;
+
+        while (index < words.length && words[index] === word) {
+          index += 1;
+        }
+
+        addColorToBins(bins, getColor(pixels, start * 4), index - start);
+      }
+    }
+
+    function makeColorBox(entries) {
+      const sums = [0, 0, 0, 0];
+      const squares = [0, 0, 0, 0];
+      let count = 0;
+
+      for (const entry of entries) {
+        count += entry.count;
+
+        for (let channel = 0; channel < 4; channel += 1) {
+          const value = entry.channels[channel];
+          sums[channel] += value * entry.count;
+          squares[channel] += value * value * entry.count;
+        }
+      }
+
+      const mean = sums.map((sum) => sum / count);
+      let axis = 0;
+      let score = -1;
+
+      if (entries.length > 1) {
+        for (let channel = 0; channel < 4; channel += 1) {
+          const weight = channel === 3 ? 4 : 1;
+          const variance = (squares[channel] - sums[channel] * mean[channel]) * weight;
+
+          if (variance > score) {
+            axis = channel;
+            score = variance;
+          }
+        }
+      }
+
+      return { entries, count, color: getColor(mean.map(Math.round), 0), axis, score };
+    }
+
+    function quantizeColors(entries, limit) {
+      const groups = [[], [], []];
+
+      for (const entry of entries) {
+        const alpha = entry.channels[3];
+        const group = alpha === 0 ? 0 : alpha === 255 ? 2 : 1;
+        groups[group].push(entry);
+      }
+
+      const boxes = groups.filter((group) => group.length > 0).map(makeColorBox);
+
+      while (boxes.length < limit) {
+        let split = -1;
+        let bestScore = -1;
+
+        for (let index = 0; index < boxes.length; index += 1) {
+          if (boxes[index].score > bestScore) {
+            split = index;
+            bestScore = boxes[index].score;
+          }
+        }
+
+        if (split < 0) {
+          break;
+        }
+
+        const { entries, count, axis } = boxes[split];
+        entries.sort((left, right) => left.channels[axis] - right.channels[axis]);
+        let cut = 1;
+        let leftCount = entries[0].count;
+
+        while (cut < entries.length - 1 && leftCount < count / 2) {
+          leftCount += entries[cut].count;
+          cut += 1;
+        }
+
+        boxes[split] = makeColorBox(entries.slice(0, cut));
+        boxes.push(makeColorBox(entries.slice(cut)));
+      }
+
+      return boxes;
+    }
+
+    async function buildPalette(decoder, frameCount, canvas, context, limit, kernels, poster) {
+      const histogram = { exact: new Map(), bins: null };
+      let frames = null;
+      kernels?.resetHistogram();
+
+      function collect(pixels) {
+        if (kernels) {
+          const offset = getKernelBuffer(kernels, pixels.byteLength);
+          new Uint8Array(kernels.memory.buffer, offset, pixels.byteLength).set(pixels);
+          kernels.collectPixels(offset, pixels.length / 4);
+        } else {
+          collectColors(histogram, pixels);
+        }
+      }
+
+      if (poster) {
+        collect(poster.pixels);
+      }
+
+      for (let index = 0; index < frameCount; index += 1) {
+        report(index / frameCount / 2, index, frameCount, "palette");
+        const frame = await readFrame(decoder, index, canvas, context);
+        const { pixels } = frame;
+
+        if (index === 0 && pixels.byteLength * frameCount <= decodedFrameCacheBytes) {
+          frames = [];
+        }
+
+        frames?.push(frame);
+        collect(pixels);
+      }
+
+      const { colors, mapColor } = kernels
+        ? readKernelPalette(kernels, limit)
+        : getJavaScriptPalette(histogram, limit);
+      const unique = [...new Set(colors)].sort((left, right) => (left >>> 24) - (right >>> 24));
+      const count = unique.length;
+      const bitDepth = count <= 2 ? 1 : count <= 4 ? 2 : count <= 16 ? 4 : 8;
+      const indices = new Map(unique.map((color, index) => [color, index]));
+
+      return { palette: { colors: unique, mapColor, indices, bitDepth }, frames };
+    }
+
+    function readKernelPalette(kernels, limit) {
+      const signedSize = kernels.getHistogramSize();
+      const size = Math.abs(signedSize);
+      const mapped = signedSize < 0 || size > limit;
+      const colorBytes = limit * 4;
+      const mappingBytes = mapped ? size * 8 : 0;
+      const workspaceBytes = mapped ? kernels.getPaletteWorkspaceSize() : 0;
+      const offset = getKernelBuffer(kernels, colorBytes + mappingBytes + workspaceBytes);
+      const mappingOffset = offset + colorBytes;
+      const count = kernels.buildPalette(limit, offset, mappingOffset, mappingOffset + mappingBytes);
+      const colors = new Uint32Array(kernels.memory.buffer, offset, count);
+      let mapColor = null;
+
+      if (mapped) {
+        const mapping = new Uint32Array(kernels.memory.buffer, mappingOffset, size * 2);
+
+        if (signedSize < 0) {
+          const lookup = new Uint32Array(colorBinCount);
+
+          for (let index = 0; index < mapping.length; index += 2) {
+            lookup[mapping[index]] = mapping[index + 1];
+          }
+
+          mapColor = (color) => lookup[getColorBin(color)];
+        } else {
+          const lookup = new Map();
+
+          for (let index = 0; index < mapping.length; index += 2) {
+            lookup.set(mapping[index], mapping[index + 1]);
+          }
+
+          mapColor = (color) => lookup.get(color);
+        }
+      }
+
+      return { colors, mapColor };
+    }
+
+    function getJavaScriptPalette(histogram, limit) {
+      const { exact, bins } = histogram;
+      let colors;
+      let mapColor = null;
+
+      if (exact && exact.size <= limit) {
+        colors = exact.keys();
+      } else {
+        const entries = exact
+          ? Array.from(exact, ([key, count]) => ({
+            key,
+            count,
+            channels: [key & 255, key >>> 8 & 255, key >>> 16 & 255, key >>> 24]
+          }))
+          : bins.keys.map((key) => {
+            const count = bins.counts[key];
+            const channels = [bins.red[key], bins.green[key], bins.blue[key], bins.alpha[key]];
+            return { key, count, channels: channels.map((sum) => sum / count) };
+          });
+
+        const boxes = quantizeColors(entries, limit);
+        colors = boxes.map((box) => box.color);
+
+        if (exact) {
+          const lookup = new Map();
+
+          for (const box of boxes) {
+            for (const entry of box.entries) {
+              lookup.set(entry.key, box.color);
+            }
+          }
+
+          mapColor = (color) => lookup.get(color);
+        } else {
+          const lookup = new Uint32Array(colorBinCount);
+
+          for (const box of boxes) {
+            for (const entry of box.entries) {
+              lookup[entry.key] = box.color;
+            }
+          }
+
+          mapColor = (color) => lookup[getColorBin(color)];
+        }
+      }
+
+      return { colors, mapColor };
+    }
+
+    function applyPalette(pixels, mapColor) {
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        const color = mapColor(getColor(pixels, offset));
+        pixels[offset] = color & 255;
+        pixels[offset + 1] = color >>> 8 & 255;
+        pixels[offset + 2] = color >>> 16 & 255;
+        pixels[offset + 3] = color >>> 24;
+      }
+    }
+
+    function appendPalette(chunks, colors) {
+      const rgb = new Uint8Array(colors.length * 3);
+      const alpha = new Uint8Array(colors.length);
+      let alphaLength = 0;
+
+      for (let index = 0; index < colors.length; index += 1) {
+        const color = colors[index];
+        rgb[index * 3] = color & 255;
+        rgb[index * 3 + 1] = color >>> 8 & 255;
+        rgb[index * 3 + 2] = color >>> 16 & 255;
+        alpha[index] = color >>> 24;
+
+        if (alpha[index] !== 255) {
+          alphaLength = index + 1;
+        }
+      }
+
+      chunks.push(makeChunk("PLTE", rgb));
+
+      if (alphaLength) {
+        chunks.push(makeChunk("tRNS", alpha.subarray(0, alphaLength)));
+      }
+    }
+
+    function packIndices(pixels, width, height, rowSize, palette) {
+      const { bitDepth, indices } = palette;
+      const packed = new Uint8Array(rowSize * height);
+
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const index = indices.get(getColor(pixels, (y * width + x) * 4));
+          const bit = x * bitDepth;
+          packed[y * rowSize + (bit >> 3)] |= index << (8 - bitDepth - (bit & 7));
+        }
+      }
+
+      return packed;
     }
 
     function getPaeth(left, up, corner) {
@@ -435,70 +865,59 @@
       return value - getPaeth(left, up, corner);
     }
 
-    function getFilterScore(source, row, rowSize, filter) {
-      const sourceOffset = row * rowSize;
-      const previousOffset = sourceOffset - rowSize;
-      let score = 0;
+    function selectFilter(source, offset, rowSize, byteStride) {
+      const previous = offset - rowSize;
+      let none = 0;
+      let sub = 0;
+      let up = 0;
+      let average = 0;
+      let paeth = 0;
 
       for (let index = 0; index < rowSize; index += 1) {
-        const value = source[sourceOffset + index];
-        const left = index < 4 ? 0 : source[sourceOffset + index - 4];
-        const up = row === 0 ? 0 : source[previousOffset + index];
-        const corner = row === 0 || index < 4
+        const value = source[offset + index];
+        const left = index < byteStride ? 0 : source[offset + index - byteStride];
+        const above = previous < 0 ? 0 : source[previous + index];
+        const corner = previous < 0 || index < byteStride
           ? 0
-          : source[previousOffset + index - 4];
-        const filtered = getFilteredValue(
-          filter,
-          value,
-          left,
-          up,
-          corner
-        ) & 0xff;
+          : source[previous + index - byteStride];
 
-        score += Math.min(filtered, 256 - filtered);
+        none += filterCosts[value];
+        sub += filterCosts[(value - left) & 255];
+        up += filterCosts[(value - above) & 255];
+        average += filterCosts[(value - ((left + above) >> 1)) & 255];
+        paeth += filterCosts[(value - getPaeth(left, above, corner)) & 255];
       }
 
-      return score;
+      const lowest = Math.min(none, sub, up, average, paeth);
+      return [none, sub, up, average, paeth].indexOf(lowest);
     }
 
-    function makeFiltered(frame, width, height, adaptive) {
-      const rowSize = width * 4;
-      const source = ArrayBuffer.isView(frame)
-        ? new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength)
-        : new Uint8Array(frame);
-      const filtered = new Uint8Array((rowSize + 1) * height);
+    function makeFiltered(source, rowSize, height, byteStride) {
+      const adaptive = new Uint8Array((rowSize + 1) * height);
+      const sub = new Uint8Array(adaptive.length);
+      let allSub = true;
 
       for (let row = 0; row < height; row += 1) {
-        const sourceOffset = row * rowSize;
-        const outputOffset = row * (rowSize + 1);
-        let bestFilter = 1;
-
-        if (adaptive) {
-          bestFilter = 0;
-          let bestScore = getFilterScore(source, row, rowSize, 0);
-
-          for (let filter = 1; filter <= 4; filter += 1) {
-            const score = getFilterScore(source, row, rowSize, filter);
-
-            if (score < bestScore) {
-              bestFilter = filter;
-              bestScore = score;
-            }
-          }
-        }
-
-        filtered[outputOffset] = bestFilter;
+        const offset = row * rowSize;
+        const previous = offset - rowSize;
+        const output = row * (rowSize + 1);
+        const filter = selectFilter(source, offset, rowSize, byteStride);
+        adaptive[output] = filter;
+        sub[output] = 1;
+        allSub &&= filter === 1;
 
         for (let index = 0; index < rowSize; index += 1) {
-          const value = source[sourceOffset + index];
-          const left = index < 4 ? 0 : source[sourceOffset + index - 4];
-          const up = row === 0 ? 0 : source[sourceOffset - rowSize + index];
-          const corner = row === 0 || index < 4
-            ? 0
-            : source[sourceOffset - rowSize + index - 4];
+          const value = source[offset + index];
+          const left = index < byteStride ? 0 : source[offset + index - byteStride];
+          sub[output + index + 1] = value - left;
 
-          filtered[outputOffset + index + 1] = getFilteredValue(
-            bestFilter,
+          const up = previous < 0 ? 0 : source[previous + index];
+          const corner = previous < 0 || index < byteStride
+            ? 0
+            : source[previous + index - byteStride];
+
+          adaptive[output + index + 1] = getFilteredValue(
+            filter,
             value,
             left,
             up,
@@ -507,27 +926,103 @@
         }
       }
 
-      return filtered;
+      return { adaptive, sub: allSub ? null : sub };
     }
 
     async function compressData(data) {
-      const stream = new Blob([data])
-        .stream()
-        .pipeThrough(new CompressionStream("deflate"));
-      const buffer = await new Response(stream).arrayBuffer();
-
+      const stream = new CompressionStream("deflate");
+      const writer = stream.writable.getWriter();
+      const compressed = new Response(stream.readable).arrayBuffer();
+      const [, buffer] = await Promise.all([writer.write(data).then(() => writer.close()), compressed]);
       return new Uint8Array(buffer);
     }
 
-    async function compressFrame(frame, width, height) {
-      const adaptive = await compressData(
-        makeFiltered(frame, width, height, true)
-      );
-      const sub = await compressData(
-        makeFiltered(frame, width, height, false)
-      );
+    async function runCompression(event) {
+      try {
+        const compressed = await compressData(event.data);
+        postMessage(compressed, [compressed.buffer]);
+      } catch {
+        postMessage(null);
+      }
+    }
 
-      return adaptive.length <= sub.length ? adaptive : sub;
+    function createCompressionWorker() {
+      const source = compressData.toString() + "\nself.onmessage = " + runCompression.toString();
+      const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+
+      try {
+        return new Worker(url);
+      } catch {
+        return null;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    function compressInWorker(worker, data) {
+      return new Promise((resolve) => {
+        worker.onmessage = (event) => resolve(event.data);
+        worker.onerror = () => resolve(null);
+        worker.onmessageerror = () => resolve(null);
+
+        try {
+          const buffer = data.slice().buffer;
+          worker.postMessage(buffer, [buffer]);
+        } catch {
+          resolve(null);
+        }
+      });
+    }
+
+    function filterWithKernels(kernels, source, rowSize, height, byteStride) {
+      const outputSize = (rowSize + 1) * height;
+      const offset = getKernelBuffer(kernels, source.byteLength + outputSize * 2);
+      const adaptiveOffset = offset + source.byteLength;
+      const subOffset = adaptiveOffset + outputSize;
+      const buffer = kernels.memory.buffer;
+      new Uint8Array(buffer, offset, source.byteLength).set(source);
+      const allSub = kernels.filterRows(offset, rowSize, height, byteStride, adaptiveOffset, subOffset);
+
+      return {
+        adaptive: new Uint8Array(buffer, adaptiveOffset, outputSize),
+        sub: allSub ? null : new Uint8Array(buffer, subOffset, outputSize)
+      };
+    }
+
+    async function compressFrame(frame, rowSize, height, byteStride, kernels, compression) {
+      const { adaptive, sub } = kernels
+        ? filterWithKernels(kernels, frame, rowSize, height, byteStride)
+        : makeFiltered(frame, rowSize, height, byteStride);
+      let pending = null;
+
+      if (sub && sub.byteLength >= 64 * 1024 && navigator.hardwareConcurrency > 1) {
+        if (compression.worker === undefined) {
+          compression.worker = createCompressionWorker();
+        }
+
+        if (compression.worker) {
+          pending = compressInWorker(compression.worker, sub);
+        }
+      }
+
+      const primary = await compressData(adaptive);
+
+      if (!sub) {
+        return primary;
+      }
+
+      let alternative = pending ? await pending : null;
+
+      if (!alternative) {
+        if (pending) {
+          compression.worker.terminate();
+          compression.worker = null;
+        }
+
+        alternative = await compressData(sub);
+      }
+
+      return primary.length <= alternative.length ? primary : alternative;
     }
 
     function appendImage(chunks, data) {
@@ -566,42 +1061,141 @@
       });
     }
 
-    async function encodePng(decoder, frameCount, info) {
+    async function readFrame(decoder, index, canvas, context) {
+      const { image } = await decoder.decode({ frameIndex: index, completeFramesOnly: true });
+
+      try {
+        const width = image.displayWidth;
+        const height = image.displayHeight;
+
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+        } else {
+          context.clearRect(0, 0, width, height);
+        }
+
+        context.drawImage(image, 0, 0, width, height);
+
+        return {
+          width,
+          height,
+          delay: Math.round((image.duration || 0) / 1000),
+          pixels: context.getImageData(0, 0, width, height).data
+        };
+      } finally {
+        image.close();
+      }
+    }
+
+    async function readPoster(buffer, canvas, context) {
+      const bytes = new Uint8Array(buffer);
+      const view = new DataView(buffer);
+      const parts = [signature];
+
+      for (let offset = signature.length; offset + 12 <= bytes.length;) {
+        const next = offset + view.getUint32(offset) + 12;
+        const name = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+
+        if (name !== "acTL" && name !== "fcTL" && name !== "fdAT") {
+          parts.push(bytes.subarray(offset, next));
+        }
+
+        if (name === "IEND") {
+          break;
+        }
+
+        offset = next;
+      }
+
+      const data = await new Blob(parts).arrayBuffer();
+      const decoder = new ImageDecoder({ data, type: "image/png", transfer: [data] });
+
+      try {
+        return await readFrame(decoder, 0, canvas, context);
+      } finally {
+        decoder.close();
+      }
+    }
+
+    function copyRect(current, previous, width, rect, updatePrevious) {
+      const rowSize = rect.width * 4;
+      const pixels = new Uint8Array(rowSize * rect.height);
+
+      for (let y = 0; y < rect.height; y += 1) {
+        const offset = ((rect.y + y) * width + rect.x) * 4;
+        const row = current.subarray(offset, offset + rowSize);
+        pixels.set(row, y * rowSize);
+
+        if (updatePrevious) {
+          previous.set(row, offset);
+        }
+      }
+
+      return pixels;
+    }
+
+    async function encodePng(decoder, frameCount, info, colorLimit, tolerance, kernels, compression, source) {
       const chunks = [signature];
-      const animated = frameCount > 1;
+      const animated = frameCount > 1 || Boolean(info.frameCount);
       const canvas = new OffscreenCanvas(1, 1);
       const context = canvas.getContext("2d", { willReadFrequently: true });
+      let poster = info.hasPoster ? await readPoster(source, canvas, context) : null;
+      const { palette, frames } = colorLimit
+        ? await buildPalette(decoder, frameCount, canvas, context, colorLimit, kernels, poster)
+        : { palette: null, frames: null };
+      const start = palette ? 0.5 : 0;
+      const bitDepth = palette?.bitDepth ?? 8;
       let sequence = 0;
       let width = 0;
       let height = 0;
       let previous = null;
 
-      for (let index = 0; index < frameCount; index += 1) {
-        report(index / frameCount, index, frameCount, "decode");
+      function compressPixels(pixels, width, height) {
+        const rowSize = palette ? Math.ceil(width * bitDepth / 8) : width * 4;
+        const bytes = palette ? packIndices(pixels, width, height, rowSize, palette) : pixels;
+        return compressFrame(bytes, rowSize, height, palette ? 1 : 4, kernels, compression);
+      }
 
-        const decoded = await decoder.decode({
-          frameIndex: index,
-          completeFramesOnly: true
-        });
-        const frame = decoded.image;
+      for (let index = 0; index < frameCount; index += 1) {
+        const progress = start + (1 - start) * index / frameCount;
+        if (!frames) {
+          report(progress, index, frameCount, "decode");
+        }
+        const { width: frameWidth, height: frameHeight, delay, pixels: current } =
+          frames ? frames[index] : await readFrame(decoder, index, canvas, context);
+
+        if (frames) {
+          frames[index] = null;
+        }
 
         if (index === 0) {
-          width = frame.displayWidth;
-          height = frame.displayHeight;
-          canvas.width = width;
-          canvas.height = height;
-          chunks.push(makeHeader(width, height));
+          width = frameWidth;
+          height = frameHeight;
+          chunks.push(makeHeader(width, height, bitDepth, palette ? 3 : 6));
+
+          if (palette) {
+            appendPalette(chunks, palette.colors);
+          }
 
           if (animated) {
             chunks.push(makeAnimation(frameCount, info.loop));
           }
+
+          if (poster) {
+            if (palette?.mapColor) {
+              applyPalette(poster.pixels, palette.mapColor);
+            }
+
+            appendImage(chunks, await compressPixels(poster.pixels, width, height));
+            poster = null;
+          }
         }
 
-        context.clearRect(0, 0, width, height);
-        context.drawImage(frame, 0, 0, width, height);
+        if (palette?.mapColor) {
+          applyPalette(current, palette.mapColor);
+        }
 
-        const delay = Math.round((frame.duration || 0) / 1000);
-        const current = context.getImageData(0, 0, width, height);
         let rect = {
           x: 0,
           y: 0,
@@ -612,21 +1206,11 @@
         let pixels = current;
 
         if (previous) {
-          const difference = getDifferenceRect(
-            previous.data,
-            current.data,
-            width,
-            height
-          );
+          const difference = getDifferenceRect(previous, current, width, height, tolerance);
 
           if (difference) {
             rect = difference;
-            pixels = context.getImageData(
-              rect.x,
-              rect.y,
-              rect.width,
-              rect.height
-            );
+            pixels = copyRect(current, previous, width, rect, tolerance > 0);
           } else {
             rect = {
               x: 0,
@@ -634,31 +1218,26 @@
               width: 1,
               height: 1
             };
-            blend = 1;
-            pixels = new ImageData(1, 1);
+            blend = palette ? 0 : 1;
+            pixels = palette ? previous.subarray(0, 4) : new Uint8Array(4);
           }
         }
 
-        frame.close();
-
         if (animated) {
-          chunks.push(makeFrame(sequence, rect, delay, blend));
+          chunks.push(makeFrame(sequence, rect, info.delays?.[index] ?? getDelay(delay), blend));
           sequence += 1;
         }
 
-        report(index / frameCount, index, frameCount, "encode");
+        report(progress, index, frameCount, "encode");
+        const compressed = await compressPixels(pixels, rect.width, rect.height);
 
-        const compressed = await compressFrame(
-          pixels.data,
-          rect.width,
-          rect.height
-        );
+        if (!previous || tolerance === 0) {
+          previous = current;
+        }
 
-        previous = current;
-        pixels = null;
-        report((index + 1) / frameCount, index, frameCount, "encoded");
+        report(start + (1 - start) * (index + 1) / frameCount, index, frameCount, "encoded");
 
-        if (index === 0) {
+        if (index === 0 && !info.hasPoster) {
           appendImage(chunks, compressed);
         } else {
           sequence = appendFrame(chunks, compressed, sequence);
@@ -671,7 +1250,8 @@
       return {
         blob: new Blob(chunks, { type: "image/png" }),
         width,
-        height
+        height,
+        animated
       };
     }
 
@@ -681,10 +1261,12 @@
       const offscreenCanvas = "OffscreenCanvas" in self;
       let gif = false;
       let webp = false;
+      let png = false;
 
       if (imageDecoder) {
         gif = await ImageDecoder.isTypeSupported("image/gif");
         webp = await ImageDecoder.isTypeSupported("image/webp");
+        png = await ImageDecoder.isTypeSupported("image/png");
       }
 
       postMessage({
@@ -693,45 +1275,53 @@
         compressionStream,
         offscreenCanvas,
         gif,
-        webp
+        webp,
+        png
       });
     }
 
-    async function convertFile(file, type) {
+    async function convertFile(file, type, colorLimit, tolerance, kernelsUrl) {
       postMessage({ action: "reading" });
 
+      kernelsPromise ??= loadKernels(kernelsUrl);
       const buffer = await file.arrayBuffer();
       const info = type === "image/gif"
         ? getGifInfo(buffer)
-        : getWebpInfo(buffer);
+        : type === "image/webp" ? getWebpInfo(buffer) : getPngInfo(buffer);
       const decoder = new ImageDecoder({
         data: buffer,
         type,
         preferAnimation: true,
-        transfer: [buffer]
+        transfer: info.hasPoster ? [] : [buffer]
       });
+      const compression = {};
 
-      await decoder.tracks.ready;
-      await decoder.completed;
+      try {
+        await decoder.tracks.ready;
+        await decoder.completed;
 
-      const track = decoder.tracks.selectedTrack;
-      const frameCount = track.frameCount;
-      const encoded = await encodePng(
-        decoder,
-        frameCount,
-        info
-      );
+        const frameCount = decoder.tracks.selectedTrack.frameCount;
 
-      decoder.close();
+        if (info.frameCount && (frameCount !== info.frameCount || info.delays.length !== frameCount)) {
+          throw new Error("Could not decode all APNG frames");
+        }
 
-      postMessage({
-        action: "complete",
-        blob: encoded.blob,
-        width: encoded.width,
-        height: encoded.height,
-        frameCount,
-        loop: info.loop
-      });
+        const kernels = await kernelsPromise;
+        const encoded = await encodePng(decoder, frameCount, info, colorLimit, tolerance, kernels, compression, buffer);
+
+        postMessage({
+          action: "complete",
+          blob: encoded.blob,
+          width: encoded.width,
+          height: encoded.height,
+          frameCount,
+          animated: encoded.animated,
+          loop: info.loop
+        });
+      } finally {
+        compression.worker?.terminate();
+        decoder.close();
+      }
     }
 
     self.addEventListener("message", async (event) => {
@@ -740,13 +1330,19 @@
       if (data.action === "support") {
         await getSupport();
       } else if (data.action === "convert") {
-        await convertFile(data.file, data.type);
+        try {
+          await convertFile(data.file, data.type, data.colorLimit, data.tolerance, data.kernelsUrl);
+        } catch (error) {
+          postMessage({ action: "error", message: error.message });
+        }
       }
     });
   </script>
   <script>
     const fileInput = document.getElementById("fileInput");
     const dropZone = document.getElementById("dropZone");
+    const colorLimit = document.getElementById("colorLimit");
+    const tolerance = document.getElementById("tolerance");
     const convertButton = document.getElementById("convertButton");
     const progress = document.getElementById("progress");
     const status = document.getElementById("status");
@@ -758,8 +1354,7 @@
 
     let outputUrl = "";
     let worker = null;
-    let gifSupported = false;
-    let webpSupported = false;
+    const supportedTypes = new Set();
     let dragDepth = 0;
 
     function formatBytes(size) {
@@ -779,6 +1374,10 @@
     }
 
     function makeName(name) {
+      if (/\.a?png$/i.test(name)) {
+        return name;
+      }
+
       const base = name.replace(/\.(gif|webp)$/i, "");
       return `${base || "output"}.png`;
     }
@@ -792,11 +1391,15 @@
         return "image/webp";
       }
 
+      if (file.type === "image/png" || file.type === "image/apng" || /\.a?png$/i.test(file.name)) {
+        return "image/png";
+      }
+
       return "";
     }
 
     function getLabel(type) {
-      return type === "image/gif" ? "GIF" : "WebP";
+      return type === "image/gif" ? "GIF" : type === "image/webp" ? "WebP" : "PNG";
     }
 
     function resetResult() {
@@ -814,6 +1417,8 @@
 
     function setEnabled(enabled) {
       fileInput.disabled = !enabled;
+      colorLimit.disabled = !enabled;
+      tolerance.disabled = !enabled;
       dropZone.classList.toggle("disabled", !enabled);
       convertButton.disabled = !enabled || !fileInput.files[0];
     }
@@ -821,7 +1426,9 @@
     function updateProgress(data) {
       progress.value = data.value * 100;
 
-      if (data.phase === "decode") {
+      if (data.phase === "palette") {
+        status.textContent = `Analyzing colors in frame ${data.index + 1} of ${data.total}`;
+      } else if (data.phase === "decode") {
         status.textContent = `Decoding frame ${data.index + 1} of ${data.total}`;
       } else if (data.phase === "encode" || data.phase === "encoded") {
         status.textContent = `Encoding frame ${data.index + 1} of ${data.total}`;
@@ -837,14 +1444,14 @@
       preview.src = outputUrl;
       downloadLink.href = outputUrl;
       downloadLink.download = makeName(file.name);
-      downloadLink.textContent = data.frameCount > 1 ? "Download APNG" : "Download PNG";
-      details.textContent = data.frameCount > 1
-        ? `${data.width} x ${data.height} | ${data.frameCount} frames | ${formatLoop(data.loop)} | ${formatBytes(file.size)} to ${formatBytes(data.blob.size)}`
+      downloadLink.textContent = data.animated ? "Download APNG" : "Download PNG";
+      details.textContent = data.animated
+        ? `${data.width} x ${data.height} | ${data.frameCount} frame${data.frameCount === 1 ? "" : "s"} | ${formatLoop(data.loop)} | ${formatBytes(file.size)} to ${formatBytes(data.blob.size)}`
         : `${data.width} x ${data.height} | 1 frame | ${formatBytes(file.size)} to ${formatBytes(data.blob.size)}`;
       result.hidden = false;
 
       progress.value = 100;
-      status.textContent = data.frameCount > 1
+      status.textContent = data.animated
         ? "Conversion complete"
         : "The input has one frame, so the output is a regular PNG";
       setEnabled(true);
@@ -866,17 +1473,19 @@
         return;
       }
 
-      gifSupported = data.gif;
-      webpSupported = data.webp;
+      for (const format of ["gif", "webp", "png"]) {
+        if (data[format]) {
+          supportedTypes.add(`image/${format}`);
+        }
+      }
 
-      if (!gifSupported && !webpSupported) {
-        status.textContent = "This browser cannot decode GIF or WebP with ImageDecoder";
+      if (!supportedTypes.size) {
+        status.textContent = "This browser cannot decode GIF, WebP, or PNG with ImageDecoder";
         return;
       }
 
-      fileInput.disabled = false;
-      dropZone.classList.remove("disabled");
-      status.textContent = "Select or drop a GIF or WebP file";
+      setEnabled(true);
+      status.textContent = "Select or drop a GIF, WebP, APNG, or PNG file";
     }
 
     function handleWorkerMessage(event) {
@@ -891,6 +1500,10 @@
         updateProgress(data);
       } else if (data.action === "complete") {
         completeConversion(data);
+      } else if (data.action === "error") {
+        status.textContent = data.message || "Conversion failed";
+        status.classList.add("error");
+        setEnabled(true);
       }
     }
 
@@ -960,7 +1573,7 @@
 
       const file = fileInput.files[0];
       const type = file ? getType(file) : "";
-      const supported = type === "image/gif" ? gifSupported : webpSupported;
+      const supported = supportedTypes.has(type);
       const valid = Boolean(file && type && supported);
       const invalid = Boolean(file && (!type || !supported));
 
@@ -971,11 +1584,11 @@
       convertButton.disabled = !valid;
 
       if (!file) {
-        status.textContent = "Select or drop a GIF or WebP file";
+        status.textContent = "Select or drop a GIF, WebP, APNG, or PNG file";
       } else if (!type) {
         const error = document.createElement("span");
         const name = document.createTextNode(file.name);
-        const message = document.createTextNode(" — Only GIF and WebP files are supported");
+        const message = document.createTextNode(" — Only GIF, WebP, APNG, and PNG files are supported");
 
         error.className = "fileError";
         error.textContent = "✕";
@@ -1002,6 +1615,14 @@
       }
     });
 
+    function normalizeTolerance() {
+      const value = Math.min(Number(tolerance.max), Math.max(Number(tolerance.min), Math.round(tolerance.valueAsNumber || 0)));
+      tolerance.valueAsNumber = value;
+      return value;
+    }
+
+    tolerance.addEventListener("change", normalizeTolerance);
+
     convertButton.addEventListener("click", () => {
       const file = fileInput.files[0];
 
@@ -1017,7 +1638,10 @@
       worker.postMessage({
         action: "convert",
         file,
-        type: getType(file)
+        type: getType(file),
+        colorLimit: Number(colorLimit.value),
+        tolerance: normalizeTolerance(),
+        kernelsUrl: new URL("apng-kernels.wasm", window.location.href).href
       });
     });
 

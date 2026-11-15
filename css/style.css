@@ -124,6 +124,36 @@
   gap: 16px;
 }
 
+.toolContent .encodingOptions {
+  display: grid;
+  gap: 16px;
+}
+
+.toolContent .encodingOptions > div {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.toolContent .encodingOptions span {
+  color: var(--muted-ink);
+  font-size: 0.875rem;
+}
+
+.toolContent .encodingOptions select,
+.toolContent .encodingOptions input {
+  min-height: 40px;
+  padding: 4px 8px;
+  border: 1px solid var(--connector);
+  background: var(--canvas);
+  color: inherit;
+  font: inherit;
+}
+
+.toolContent .encodingOptions input {
+  inline-size: 5em;
+}
+
 .toolContent .dropZone {
   position: relative;
   display: grid;
