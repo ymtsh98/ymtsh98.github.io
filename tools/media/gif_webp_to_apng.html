@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="../../css/style.css?v=20261115-apng-option-stack">
+  <link rel="stylesheet" href="../../css/style.css?v=20261115-apng-drop-file">
   <script src="../../js/box-connections.js?v=20260803-shared-connections-8" defer></script>
   <script src="../../js/hand-drawn-frames.js?v=20260803-ballpoint-frames-4" defer></script>
 </head>
@@ -1387,6 +1387,9 @@
   <script>
     const fileInput = document.getElementById("fileInput");
     const dropZone = document.getElementById("dropZone");
+    const dropTitle = dropZone.querySelector(".dropTitle");
+    const dropHint = dropZone.querySelector(".dropHint");
+    const defaultDropTitle = dropTitle.textContent;
     const colorLimit = document.getElementById("colorLimit");
     const tolerance = document.getElementById("tolerance");
     const convertButton = document.getElementById("convertButton");
@@ -1625,9 +1628,14 @@
 
       dropZone.classList.toggle("selected", valid);
       dropZone.classList.toggle("error", invalid);
+      dropHint.hidden = valid;
       status.classList.toggle("error", invalid);
       convertButton.classList.toggle("error", invalid);
       convertButton.disabled = !valid;
+
+      if (!valid) {
+        dropTitle.textContent = defaultDropTitle;
+      }
 
       if (!file) {
         status.textContent = "Select or drop a GIF, WebP, APNG, or PNG file";
@@ -1651,13 +1659,13 @@
         status.replaceChildren(error, name, message);
       } else {
         const check = document.createElement("span");
-        const name = document.createTextNode(file.name);
-        const size = document.createTextNode(` (${formatBytes(file.size)})`);
+        const name = document.createTextNode(` ${file.name} (${formatBytes(file.size)})`);
 
         check.className = "fileCheck";
         check.textContent = "✓";
         check.setAttribute("aria-label", "File selected");
-        status.replaceChildren(check, name, size);
+        dropTitle.replaceChildren(check, name);
+        status.textContent = "";
       }
     });
 

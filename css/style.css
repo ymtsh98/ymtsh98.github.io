@@ -196,6 +196,7 @@
 .toolContent .dropTitle {
   font-size: 1.125rem;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .toolContent .dropHint {
