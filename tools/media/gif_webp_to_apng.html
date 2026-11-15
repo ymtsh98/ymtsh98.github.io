@@ -70,7 +70,9 @@
     const colorBinCount = 1 + 17 * 32 ** 3;
     const filterCosts = Uint8Array.from({ length: 256 }, (_, value) => Math.min(value, 256 - value));
     const decodedFrameCacheBytes = 64 * 1024 * 1024;
+    const rgbaCopyOptions = { format: "RGBA", colorSpace: "srgb" };
     let kernelsPromise;
+    let rgbaCopySupport;
 
     async function loadKernels(url) {
       try {
@@ -1061,27 +1063,71 @@
       });
     }
 
+    async function supportsRgbaCopy() {
+      let sample;
+
+      try {
+        sample = new VideoFrame(new Uint8Array([17, 29, 71, 255]), {
+          format: "BGRA",
+          codedWidth: 1,
+          codedHeight: 1,
+          timestamp: 0
+        });
+        const pixel = new Uint8Array(4);
+        await sample.copyTo(pixel, rgbaCopyOptions);
+        return pixel[0] === 71 && pixel[1] === 29 && pixel[2] === 17 && pixel[3] === 255;
+      } catch {
+        return false;
+      } finally {
+        sample?.close();
+      }
+    }
+
+    async function readPixels(image, canvas, context) {
+      const width = image.displayWidth;
+      const height = image.displayHeight;
+      const rect = image.visibleRect;
+      rgbaCopySupport ??= supportsRgbaCopy();
+
+      if (rect?.width === width && rect.height === height && !image.rotation && !image.flip
+        && await rgbaCopySupport) {
+        try {
+          const pixels = new Uint8Array(width * height * 4);
+          await image.copyTo(pixels, rgbaCopyOptions);
+          return pixels;
+        } catch {}
+      }
+
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      } else {
+        context.clearRect(0, 0, width, height);
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      const { data } = context.getImageData(0, 0, width, height);
+
+      for (let offset = 0; offset < data.length; offset += 4) {
+        if (data[offset + 3] === 0) {
+          data[offset] = 0;
+          data[offset + 1] = 0;
+          data[offset + 2] = 0;
+        }
+      }
+
+      return data;
+    }
+
     async function readFrame(decoder, index, canvas, context) {
       const { image } = await decoder.decode({ frameIndex: index, completeFramesOnly: true });
 
       try {
-        const width = image.displayWidth;
-        const height = image.displayHeight;
-
-        if (canvas.width !== width || canvas.height !== height) {
-          canvas.width = width;
-          canvas.height = height;
-        } else {
-          context.clearRect(0, 0, width, height);
-        }
-
-        context.drawImage(image, 0, 0, width, height);
-
         return {
-          width,
-          height,
+          width: image.displayWidth,
+          height: image.displayHeight,
           delay: Math.round((image.duration || 0) / 1000),
-          pixels: context.getImageData(0, 0, width, height).data
+          pixels: await readPixels(image, canvas, context)
         };
       } finally {
         image.close();
