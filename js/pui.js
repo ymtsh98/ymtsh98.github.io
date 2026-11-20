@@ -25,7 +25,8 @@
 
   const videoFps = 48;
   const otherHoverFrame = 22;
-  const rendererUrl = new URL("pui-4dgs.js?v=20261111-2", document.currentScript.src).href;
+  const rendererUrl = new URL("pui-4dgs.js?v=20261121-3", document.currentScript.src).href;
+  const loadingMessage = "Loading 4DGS...";
   const canUseHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   let currentFrame = 0;
   let targetFrame = 0;
@@ -505,12 +506,15 @@
 
   const loadViewer = () => {
     if (!viewerPromise) {
-      viewerPromise = loadRenderer().then(() => window.createPuiGs(canvas, {
+      const pending = loadRenderer().then(() => window.createPuiGs(canvas, {
         interactionElement: display,
         onDraw: () => {
           if (!canvas.hidden) {
             presentFrame(canvas);
           }
+        },
+        onLoadComplete: () => {
+          if (viewerPromise === pending && status.textContent === loadingMessage) status.hidden = true;
         },
         onInteractionEnd: (event) => {
           if (!canUseHover || !isSelected) {
@@ -528,15 +532,17 @@
             deactivatePui();
           }
         },
-        onError: showViewerError
+        onError: (error) => {
+          if (viewerPromise === pending) showViewerError(error);
+        }
       })).then((renderer) => {
-        viewer = renderer;
-        renderer.setActive(false);
+        if (viewerPromise === pending) viewer = renderer;
         return renderer;
       }).catch((error) => {
-        viewerPromise = undefined;
+        if (viewerPromise === pending) viewerPromise = undefined;
         throw error;
       });
+      viewerPromise = pending;
     }
     return viewerPromise;
   };
@@ -579,16 +585,15 @@
     window.siteBackgroundEffects?.fadeOutEffect?.();
 
     const activation = ++viewerActivation;
-    const wasReady = Boolean(viewer);
-    if (!wasReady) {
-      status.textContent = "Loading 4DGS...";
-      status.hidden = false;
+    status.hidden = viewer?.isLoading === false;
+    if (!status.hidden) {
+      status.textContent = loadingMessage;
     }
     loadViewer().then(async (renderer) => {
       if (!isSelected || activation !== viewerActivation) {
         return;
       }
-      viewer = renderer;
+      media.classList.add("isViewerActive");
       const prepared = await renderer.prepareFrame(startFrame);
       if (!prepared || !isSelected || activation !== viewerActivation) {
         return;
@@ -599,9 +604,7 @@
         }
         currentFrame = startFrame;
         isPlayingSelf = true;
-        status.hidden = true;
         canvas.hidden = false;
-        media.classList.add("isViewerActive");
         presentFrame(canvas);
         playTo(47);
       });
@@ -669,7 +672,7 @@
   }
 
   display.addEventListener("pointerup", (event) => {
-    if (!canvas.hidden || event.pointerType !== "touch") {
+    if (!canvas.hidden || event.pointerType !== "touch" || (isSelected && viewerPromise)) {
       return;
     }
 
@@ -678,7 +681,7 @@
   });
 
   display.addEventListener("click", () => {
-    if (!canvas.hidden) {
+    if (!canvas.hidden || (isSelected && viewerPromise)) {
       return;
     }
     if (performance.now() - lastTouchActivation < 700) {
