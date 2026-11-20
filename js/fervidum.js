@@ -964,24 +964,6 @@ const initializeFervidumVideo = (tile) => {
 
   let playbackStarted = false;
 
-  const preloadVideo = () => {
-    video.preload = "auto";
-  };
-
-  const scheduleVideoPreload = () => {
-    if (window.requestIdleCallback) {
-      window.requestIdleCallback(preloadVideo);
-    } else {
-      window.setTimeout(preloadVideo, 0);
-    }
-  };
-
-  if (document.readyState === "complete") {
-    scheduleVideoPreload();
-  } else {
-    window.addEventListener("load", scheduleVideoPreload, { once: true });
-  }
-
   const resetVideo = () => {
     playbackStarted = false;
     if (video.readyState >= 1) {
@@ -1004,7 +986,7 @@ const initializeFervidumVideo = (tile) => {
   });
 
   tile.addEventListener("mouseenter", () => {
-    preloadVideo();
+    video.preload = "auto";
     if (video.error) {
       video.load();
     }
@@ -1139,6 +1121,7 @@ const initializeTouchEffects = () => {
 
     const activateTouch = () => {
       if (video) {
+        video.preload = "auto";
         if (!video.hasAttribute("src") || video.error) {
           video.src = video.dataset.fervidumSrc;
         }

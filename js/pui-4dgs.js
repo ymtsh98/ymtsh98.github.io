@@ -5,6 +5,7 @@
 
   const loadLocalScene = () => new Promise((resolve, reject) => {
     const script = document.createElement("script");
+    script.fetchPriority = "high";
     script.src = sceneUrl;
     script.onload = () => {
       script.remove();
@@ -27,12 +28,7 @@
   const runWorker = () => {
     let config;
     let textureWidth;
-    let previewScale;
     let values;
-    let loadedSplatCount = 0;
-    let geometryRevision = 0;
-    let shapeReady = false;
-    let frameDataComplete = false;
     const depthBounds = [];
 
     const dataError = () => new Error("4DGSデータを読み込めませんでした。");
@@ -74,7 +70,7 @@
         const reader = local.payload.stream().pipeThrough(new TextDecoderStream()).getReader();
         return { scene: local.scene, stream: decodePayload(reader) };
       }
-      const response = await fetch(url);
+      const response = await fetch(url, { priority: "high" });
       if (!response.ok || !response.body) throw dataError();
       const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
       const assignment = "window.pui4dgsData = ";
@@ -95,29 +91,14 @@
 
     const getFrameHeight = (count) => Math.ceil(count * 3 / textureWidth);
 
-    const snapshotFrame = (rows, count) => {
-      const snapshot = rows.slice(0, textureWidth * getFrameHeight(count) * 4);
-      if (frameDataComplete) return snapshot;
-      for (let point = 0; point < count; point++) {
-        const offset = point * 12;
-        if (!shapeReady) {
-          snapshot.fill(previewScale, offset + 4, offset + 7);
-          snapshot.fill(0, offset + 8, offset + 11);
-          snapshot[offset + 11] = 1;
-        }
-        snapshot[offset + 7] = 0.35;
-      }
-      return snapshot;
-    };
-
     const counts = new Uint32Array(65536);
     const offsets = new Uint32Array(65536);
     let depths = new Float32Array(0);
     let bins = new Uint16Array(0);
 
-    const sortFrame = ({ frame, revision, planes, activeFrame, activeGeometryRevision }) => {
+    const sortFrame = ({ frame, revision, planes, activeFrame }) => {
       const rows = values[frame];
-      const count = Math.min(config.frames[frame].count, loadedSplatCount);
+      const count = config.frames[frame].count;
       const depthBoundsPositions = depthBounds[frame];
       if (depths.length !== count) {
         depths = new Float32Array(count);
@@ -160,10 +141,9 @@
       for (let point = 0; point < count; point++) {
         order[offsets[bins[point]]++] = point;
       }
-      const geometryChanged = frame !== activeFrame || geometryRevision !== activeGeometryRevision;
-      const snapshot = geometryChanged ? snapshotFrame(rows, count) : null;
+      const snapshot = frame === activeFrame ? null : rows.slice(0, textureWidth * getFrameHeight(count) * 4);
       const transfers = snapshot ? [order.buffer, snapshot.buffer] : [order.buffer];
-      self.postMessage({ type: "sorted", frame, revision, geometryRevision, order, values: snapshot }, transfers);
+      self.postMessage({ type: "sorted", frame, revision, order, values: snapshot }, transfers);
     };
 
     const decodeHalf = (value) => {
@@ -208,16 +188,10 @@
       if (descriptor.kind !== "tracks") {
         throw new Error("4DGSの圧縮方式を読み込めません。");
       }
-      const knots = decodeTrackRange(bytes, descriptor, frameCount, assign, 0, count, 0);
-      if (knots !== descriptor.knots) {
-        throw new Error("4DGSの動きデータの長さが一致しません。");
-      }
-    };
-
-    const decodeTrackRange = (bytes, descriptor, frameCount, assign, firstPoint, endPoint, cursor) => {
+      let cursor = 0;
       const timesOffset = descriptor.count * descriptor.countBytes;
       const valuesOffset = timesOffset + descriptor.knots * descriptor.timeBytes;
-      for (let point = firstPoint; point < endPoint; point++) {
+      for (let point = 0; point < count; point++) {
         const knots = readUnsigned(bytes, point * descriptor.countBytes, descriptor.countBytes);
         let previousTime = 0;
         let previousValue = 0;
@@ -239,52 +213,12 @@
           assign(frame, point, previousValue * descriptor.step);
         }
       }
-      return cursor;
-    };
-
-    const decodePositionTracks = async (readBytes, readChunk, descriptor, frameCount, assign) => {
-      const { count, countBytes, knots, timeBytes, wordBytes, bytes, offset } = descriptor;
-      const highBytesOffset = count * countBytes + knots * (timeBytes + wordBytes - 1);
-      if (highBytesOffset + knots !== bytes) {
-        throw new Error("4DGSの動きデータの長さが一致しません。");
-      }
-      const block = new Uint8Array(bytes);
-      block.set(await readBytes(highBytesOffset));
-
-      let cursor = 0;
-      let firstPoint = 0;
-      let receivedKnots = 0;
-      do {
-        if (receivedKnots < knots) {
-          const chunk = await readChunk(knots - receivedKnots);
-          block.set(chunk, highBytesOffset + receivedKnots);
-          receivedKnots += chunk.length;
-        }
-
-        let endPoint = firstPoint;
-        let endKnot = cursor;
-        while (endPoint < count) {
-          const nextKnot = endKnot + readUnsigned(block, endPoint * countBytes, countBytes);
-          if (nextKnot > knots) throw new Error("4DGSの動きデータの長さが一致しません。");
-          if (nextKnot > receivedKnots) break;
-          endKnot = nextKnot;
-          endPoint++;
-        }
-        if (endPoint > firstPoint) {
-          cursor = decodeTrackRange(block, descriptor, frameCount, assign, firstPoint, endPoint, cursor);
-          firstPoint = endPoint;
-          publishGeometry(offset + endPoint);
-          await yieldToWorker();
-        }
-      } while (receivedKnots < knots);
-      if (firstPoint !== count || cursor !== knots) {
+      if (cursor !== descriptor.knots) {
         throw new Error("4DGSの動きデータの長さが一致しません。");
       }
     };
 
-    const yieldToWorker = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-    const loadAppearance = async (count, sh, readBytes, readChunk) => {
+    const loadAppearance = async (count, sh, readBytes) => {
       const acCount = ((sh.coefficients || 4) - 1) * 3;
       if (sh.bytes !== (6 + acCount) * count) {
         throw new Error("4DGSの外観データの長さが一致しません。");
@@ -293,83 +227,53 @@
       const height = Math.ceil(count * 12 / textureWidth);
       const appearance = new Float32Array(textureWidth * height * 4);
 
-      const publishAppearance = (firstPoint, endPoint) => {
-        const firstRow = Math.floor(firstPoint * 12 / textureWidth);
-        const endRow = Math.ceil(endPoint * 12 / textureWidth);
-        const values = appearance.slice(firstRow * textureWidth * 4, endRow * textureWidth * 4);
-        self.postMessage({ type: "appearance", firstRow, height: endRow - firstRow, values }, [values.buffer]);
-      };
-
-      const red = await readBytes(count * 2);
-      const green = await readBytes(count * 2);
-      const blueLow = await readBytes(count);
-      let firstPoint = 0;
-      while (firstPoint < count) {
-        const blueHigh = await readChunk(count - firstPoint);
-        const endPoint = firstPoint + blueHigh.length;
-        for (let point = firstPoint; point < endPoint; point++) {
-          const offset = point * 48;
-          appearance[offset] = decodeHalf(red[point] + red[point + count] * 256);
-          appearance[offset + 1] = decodeHalf(green[point] + green[point + count] * 256);
-          appearance[offset + 2] = decodeHalf(blueLow[point] + blueHigh[point - firstPoint] * 256);
+      const bytes = await readBytes(sh.bytes);
+      for (let point = 0; point < count; point++) {
+        const offset = point * 48;
+        for (let color = 0; color < 3; color++) {
+          const low = color * 2 * count + point;
+          appearance[offset + color] = decodeHalf(bytes[low] + bytes[low + count] * 256);
         }
-        publishAppearance(firstPoint, endPoint);
-        firstPoint = endPoint;
-        await yieldToWorker();
-      }
-
-      let coefficient = 0;
-      for (let degree = 1; coefficient < acCount; degree++) {
-        const end = Math.min(acCount, ((degree + 1) ** 2 - 1) * 3);
-        for (; coefficient < end; coefficient++) {
-          const channel = await readBytes(count);
-          for (let point = 0; point < count; point++) {
-            appearance[point * 48 + coefficient + 3] = sh.minimum[coefficient]
-              + channel[point] * sh.step[coefficient];
-          }
+        for (let coefficient = 0; coefficient < acCount; coefficient++) {
+          const encoded = bytes[(6 + coefficient) * count + point];
+          appearance[offset + 3 + coefficient] = sh.minimum[coefficient] + encoded * sh.step[coefficient];
         }
-        publishAppearance(0, count);
-        await yieldToWorker();
       }
+      return appearance;
     };
 
     const loadFrames = async (stream) => {
       const reader = stream.getReader();
       let buffer = new Uint8Array(0);
-      const readChunk = async (maximumLength) => {
-        while (!buffer.length) {
-          const { done, value } = await reader.read();
-          if (done) throw dataError();
-          buffer = value;
-        }
-        const length = Math.min(buffer.length, maximumLength);
-        const chunk = buffer.subarray(0, length);
-        buffer = buffer.subarray(length);
-        return chunk;
-      };
       const readBytes = async (length) => {
         const bytes = new Uint8Array(length);
         let offset = 0;
         while (offset < length) {
-          const chunk = await readChunk(length - offset);
-          bytes.set(chunk, offset);
-          offset += chunk.length;
+          if (!buffer.length) {
+            const { done, value } = await reader.read();
+            if (done) throw dataError();
+            buffer = value;
+          }
+          const count = Math.min(buffer.length, length - offset);
+          bytes.set(buffer.subarray(0, count), offset);
+          offset += count;
+          buffer = buffer.subarray(count);
         }
         return bytes;
       };
 
       try {
-        await decodeFrames(readBytes, readChunk);
+        const appearance = await decodeFrames(readBytes);
         if (buffer.length || !(await reader.read()).done) {
           throw new Error("4DGSデータの長さが一致しません。");
         }
-        self.postMessage({ type: "complete" });
+        self.postMessage({ type: "complete", appearance }, [appearance.buffer]);
       } finally {
         await reader.cancel();
       }
     };
 
-    const decodeFrames = async (readBytes, readChunk) => {
+    const decodeFrames = async (readBytes) => {
       const prefix = await readBytes(12);
       const decoder = new TextDecoder();
       if (decoder.decode(prefix.subarray(0, 8)) !== "MGSC0001") {
@@ -393,38 +297,25 @@
           const assign = (frame, point, value) => {
             values[frame][(point + group.offset) * 12 + column] = channel >= 3 && channel < 6 ? Math.exp(value) : value;
           };
-          if (column === 2 && group.kind === "tracks") {
-            await decodePositionTracks(readBytes, readChunk, group, header.frameCount, assign);
-          } else {
-            const block = await readBytes(group.bytes);
-            decodeChannel(block, group, header.frameCount, assign);
-            if (column === 2) publishGeometry(group.offset + group.count);
-            if (loadedSplatCount > 0) await yieldToWorker();
-          }
+          const block = await readBytes(group.bytes);
+          decodeChannel(block, group, header.frameCount, assign);
           groupBytes += group.bytes;
         }
         if (groupBytes !== descriptor.bytes) {
           throw new Error("4DGSのグループ長が一致しません。");
         }
-        if (column === 11) {
-          await normalizeRotations(values, header.count);
-          shapeReady = true;
-          publishGeometry(loadedSplatCount);
-        }
-        await yieldToWorker();
       }
-      frameDataComplete = true;
-      publishGeometry(loadedSplatCount);
-
-      await loadAppearance(header.count, header.sh, readBytes, readChunk);
+      normalizeRotations(values, header.count);
+      const appearance = await loadAppearance(header.count, header.sh, readBytes);
 
       for (let frame = 0; frame < header.frameCount; frame++) {
         const bounds = await readBytes(header.bounds[frame].bytes);
         depthBounds[frame] = new Float32Array(bounds.buffer);
       }
+      return appearance;
     };
 
-    const normalizeRotations = async (values, count) => {
+    const normalizeRotations = (values, count) => {
       for (let frame = 0; frame < values.length; frame++) {
         const rows = values[frame];
         for (let point = 0; point < count; point++) {
@@ -434,21 +325,13 @@
             for (let axis = 8; axis < 12; axis++) rows[start + axis] /= norm;
           }
         }
-        if (frame % 8 === 7) await yieldToWorker();
       }
-    };
-
-    const publishGeometry = (count) => {
-      loadedSplatCount = count;
-      geometryRevision += 1;
-      self.postMessage({ type: "geometry", count, geometryRevision });
     };
 
     const load = async (data) => {
       const { scene, stream } = await loadScene(data);
       config = scene.config;
       textureWidth = data.textureWidth;
-      previewScale = Math.hypot(...config.cameraPosition.map((value, index) => value - config.target[index])) * 0.0015;
       self.postMessage({ type: "scene", scene });
       await loadFrames(stream);
     };
@@ -465,7 +348,6 @@
   const createRenderer = (canvas, gl, textureWidth, scene, worker, lifetime, {
     interactionElement = canvas,
     onDraw,
-    onLoadComplete,
     onInteractionEnd,
     onError
   } = {}) => {
@@ -501,12 +383,9 @@
     let sortBusy = false;
     let viewRevision = 0;
     let sortedRevision = -1;
-    let geometryRevision = 0;
-    let sortedGeometryRevision = -1;
     let requestedFrame = 0;
     let activeFrame = -1;
     let renderedFrame = -1;
-    let loadedSplatCount = 0;
     let activeSplatCount = 0;
     let framePreparation;
 
@@ -650,7 +529,7 @@
 
     const drawFrame = (now) => {
       animationFrame = undefined;
-      if (!active || failed) {
+      if (!active || failed || isLoading) {
         return;
       }
 
@@ -686,18 +565,14 @@
         }
 
         const frame = config.frames[requestedFrame];
-        const splatCount = Math.min(frame.count, loadedSplatCount);
-        if (!sortBusy && splatCount > 0 && (requestedFrame !== activeFrame
-          || sortedRevision !== viewRevision || sortedGeometryRevision !== geometryRevision
-          || splatCount !== activeSplatCount)) {
+        if (!sortBusy && frame.count > 0 && (requestedFrame !== activeFrame || sortedRevision !== viewRevision)) {
           const camera = cameraState(frame);
           worker.postMessage({
             type: "sort",
             planes: [...camera.forward, -dot(camera.forward, camera.position)],
             frame: requestedFrame,
             revision: viewRevision,
-            activeFrame,
-            activeGeometryRevision: sortedGeometryRevision
+            activeFrame
           });
           sortBusy = true;
         }
@@ -811,7 +686,7 @@
             }
           }
           pointers.clear();
-        } else if (!failed && animationFrame === undefined) {
+        } else if (!failed && !isLoading && animationFrame === undefined) {
           dirty = true;
           animationFrame = requestAnimationFrame(drawFrame);
         }
@@ -837,10 +712,10 @@
       }
     }, { capture: true, signal });
     interactionElement.addEventListener("contextmenu", (event) => {
-      if (active) event.preventDefault();
+      if (active && !isLoading) event.preventDefault();
     }, { signal });
     interactionElement.addEventListener("pointerdown", (event) => {
-      if (!active || (event.pointerType === "mouse" && event.button !== 0 && event.button !== 1 && event.button !== 2)) {
+      if (!active || isLoading || (event.pointerType === "mouse" && event.button !== 0 && event.button !== 1 && event.button !== 2)) {
         return;
       }
       event.preventDefault();
@@ -900,7 +775,7 @@
       if (wasInteracting) onInteractionEnd?.();
     }, { signal });
     interactionElement.addEventListener("wheel", (event) => {
-      if (!active) return;
+      if (!active || isLoading) return;
       event.preventDefault();
       cancelCameraReset();
       const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? interactionElement.clientHeight : 1;
@@ -917,20 +792,12 @@
     worker.onmessage = ({ data }) => {
       if (failed) return;
       switch (data.type) {
-        case "geometry":
-          loadedSplatCount = data.count;
-          geometryRevision = data.geometryRevision;
-          break;
-        case "appearance":
-          gl.activeTexture(gl.TEXTURE1);
-          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, data.firstRow, textureWidth, data.height, gl.RGBA, gl.FLOAT, data.values);
-          gl.activeTexture(gl.TEXTURE0);
-          dirty = true;
-          break;
         case "complete":
+          gl.activeTexture(gl.TEXTURE1);
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, textureWidth, shHeight, gl.RGBA, gl.FLOAT, data.appearance);
+          gl.activeTexture(gl.TEXTURE0);
           isLoading = false;
-          invalidateView();
-          onLoadComplete?.();
+          if (active) controller.setActive(true);
           break;
         case "sorted":
           sortBusy = false;
@@ -938,7 +805,6 @@
             || ((cameraReset || framePreparation) && data.frame !== requestedFrame)) break;
           uploadFrame(data.frame, data.order, data.values);
           sortedRevision = data.revision;
-          sortedGeometryRevision = data.geometryRevision;
           break;
         case "error":
           fail(new Error(data.message));

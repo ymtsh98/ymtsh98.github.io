@@ -25,7 +25,7 @@
 
   const videoFps = 48;
   const otherHoverFrame = 22;
-  const rendererUrl = new URL("pui-4dgs.js?v=20261121-3", document.currentScript.src).href;
+  const rendererUrl = new URL("pui-4dgs.js?v=20261121-9", document.currentScript.src).href;
   const loadingMessage = "Loading 4DGS...";
   const canUseHover = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
   let currentFrame = 0;
@@ -374,6 +374,7 @@
       if (isPlayingSelf && viewer) {
         timer = window.setInterval(advanceFrame, 1000 / viewer.fps);
       } else {
+        video.preload = "auto";
         isVideoAnimating = true;
         if (backwards) playVideoReverse(playbackRevision);
         else playVideoForward(playbackRevision);
@@ -425,6 +426,7 @@
     viewer.setFrame(currentFrame);
     isReturningToFront = true;
     status.hidden = true;
+    video.preload = "auto";
     showFrame();
     prepareVideoReturn();
     viewer.resetCamera().then((complete) => {
@@ -491,6 +493,7 @@
           return;
         }
         const script = document.createElement("script");
+        script.fetchPriority = "high";
         script.src = rendererUrl;
         script.onload = resolve;
         script.onerror = () => {
@@ -512,9 +515,6 @@
           if (!canvas.hidden) {
             presentFrame(canvas);
           }
-        },
-        onLoadComplete: () => {
-          if (viewerPromise === pending && status.textContent === loadingMessage) status.hidden = true;
         },
         onInteractionEnd: (event) => {
           if (!canUseHover || !isSelected) {
@@ -593,7 +593,6 @@
       if (!isSelected || activation !== viewerActivation) {
         return;
       }
-      media.classList.add("isViewerActive");
       const prepared = await renderer.prepareFrame(startFrame);
       if (!prepared || !isSelected || activation !== viewerActivation) {
         return;
@@ -605,6 +604,8 @@
         currentFrame = startFrame;
         isPlayingSelf = true;
         canvas.hidden = false;
+        media.classList.add("isViewerActive");
+        status.hidden = true;
         presentFrame(canvas);
         playTo(47);
       });

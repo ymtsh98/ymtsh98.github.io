@@ -7,6 +7,31 @@ window.galleryEffects ??= {
     document.dispatchEvent?.(new CustomEvent("gallery:effectactivate", {
       detail: { effect }
     }));
+  },
+  preloadWhenIdle(url, type, shouldPreload) {
+    const preload = () => {
+      if (!shouldPreload()) {
+        return;
+      }
+      const link = document.createElement("link");
+      link.rel = "preload";
+      link.as = type;
+      link.fetchPriority = "low";
+      link.href = url;
+      document.head.appendChild(link);
+    };
+    const schedule = () => {
+      if (window.requestIdleCallback) {
+        window.requestIdleCallback(preload);
+      } else {
+        window.setTimeout(preload, 0);
+      }
+    };
+    if (document.readyState === "complete") {
+      schedule();
+    } else {
+      window.addEventListener("load", schedule, { once: true });
+    }
   }
 };
 
@@ -33,29 +58,17 @@ stroke1Tiles.forEach((tile) => {
 
   const hoverImage = new Image();
 
-  const preloadHoverImage = (priority = "low") => {
+  const loadHoverImage = () => {
     if (isHoverImageLoading || isHoverImageLoaded) {
       return;
     }
 
     isHoverImageLoading = true;
-    hoverImage.fetchPriority = priority;
+    hoverImage.fetchPriority = "high";
     hoverImage.src = hoverSrc;
   };
 
-  const scheduleHoverPreload = () => {
-    if (window.requestIdleCallback) {
-      window.requestIdleCallback(() => preloadHoverImage());
-    } else {
-      window.setTimeout(() => preloadHoverImage(), 0);
-    }
-  };
-
-  if (document.readyState === "complete") {
-    scheduleHoverPreload();
-  } else {
-    window.addEventListener("load", scheduleHoverPreload, { once: true });
-  }
+  window.galleryEffects.preloadWhenIdle(hoverSrc, "image", () => !isHoverImageLoading && !isHoverImageLoaded);
 
   const finishFade = () => {
     fadeTimer = undefined;
@@ -126,7 +139,7 @@ stroke1Tiles.forEach((tile) => {
     if (isHoverImageLoaded) {
       startStroke1();
     } else {
-      preloadHoverImage("high");
+      loadHoverImage();
     }
   };
 

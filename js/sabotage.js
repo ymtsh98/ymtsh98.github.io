@@ -72,6 +72,7 @@
   let touchStart;
   let drag;
   let animationLoad;
+  let animationData;
   let isLoadingAnimation = false;
 
   const splatVertex = `#version 300 es
@@ -852,7 +853,7 @@
     if (isHovered === hovered) return;
 
     isHovered = hovered;
-    if (hovered) preloadAnimation("high");
+    if (hovered) loadAnimation();
     updateLoadingStatus();
     updateInteraction(target);
   }
@@ -862,7 +863,7 @@
 
     isTouchActive = active;
     media.classList.toggle("isTouchActive", active && ready);
-    if (active) preloadAnimation("high");
+    if (active) loadAnimation();
     updateLoadingStatus();
     updateInteraction(target);
   }
@@ -981,11 +982,11 @@
     requestRender();
   }
 
-  function loadAnimationData(priority) {
+  function loadAnimationData() {
     return new Promise((resolve, reject) => {
       const script = document.createElement("script");
+      script.fetchPriority = "high";
       script.src = dataUrl;
-      script.fetchPriority = priority;
       script.onload = () => {
         const data = window.sabotageData;
         delete window.sabotageData;
@@ -1004,11 +1005,20 @@
     });
   }
 
-  function preloadAnimation(priority = "low") {
+  function loadAnimation() {
     if (animationLoad || !firstColor || typeof VideoDecoder === "undefined") return;
 
     setAnimationLoading(true);
-    animationLoad = loadAnimationData(priority).then(initialize, error => {
+    animationLoad = (animationData ? Promise.resolve(animationData) : loadAnimationData()).then(data => {
+      if (!effectsAreActive()) {
+        animationData = data;
+        animationLoad = undefined;
+        setAnimationLoading(false);
+        return;
+      }
+      animationData = undefined;
+      return initialize(data);
+    }, error => {
       animationLoad = undefined;
       setAnimationLoading(false);
       setTouchActive(false);
@@ -1025,18 +1035,8 @@
     loadingStatus.hidden = !isLoadingAnimation || !(isHovered || isTouchActive);
   }
 
-  function scheduleAnimationPreload() {
-    if (window.requestIdleCallback) {
-      window.requestIdleCallback(() => preloadAnimation());
-    } else {
-      window.setTimeout(() => preloadAnimation(), 0);
-    }
-  }
-
   showFirstFrame();
-  if (document.readyState === "complete") {
-    scheduleAnimationPreload();
-  } else {
-    window.addEventListener("load", scheduleAnimationPreload, {once: true});
+  if (firstColor && typeof VideoDecoder !== "undefined") {
+    window.galleryEffects?.preloadWhenIdle?.(dataUrl, "script", () => !animationLoad && !animationData);
   }
 })();
